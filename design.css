@@ -1891,18 +1891,18 @@
      ===================================================================== */
   .sr-only{position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;}
   .brand-logo{
-    display:block; height:60px; width:auto; border-radius:12px; background:#2b3947;
-    box-shadow:0 2px 0 rgba(15,43,43,.22), 0 0 0 1px rgba(15,43,43,.12);
-    transition:transform .2s ease, box-shadow .2s ease;
+    display:block; height:72px; width:auto; background:none; border:0;
+    filter:drop-shadow(0 2px 0 rgba(15,43,43,.18));
+    transition:transform .2s ease, filter .2s ease;
   }
-  .logo-btn:hover .brand-logo{transform:translateY(-1px) rotate(-1.5deg); box-shadow:0 4px 0 rgba(15,43,43,.22), 0 0 0 1px rgba(15,43,43,.12);}
+  .logo-btn:hover .brand-logo{transform:translateY(-1px) rotate(-1.5deg); filter:drop-shadow(0 4px 0 rgba(15,43,43,.2));}
   .logo-btn:active .brand-logo{transform:scale(.96);}
   .logo-btn .brand-logo.wave-spin{animation:logoPop .8s cubic-bezier(.3,1.4,.5,1);}
   @keyframes logoPop{0%{transform:scale(1) rotate(0);} 35%{transform:scale(1.14) rotate(-5deg);} 70%{transform:scale(.97) rotate(2deg);} 100%{transform:scale(1) rotate(0);}}
-  .app.mobile-mode .brand-logo{height:46px; border-radius:10px;}
+  .app.mobile-mode .brand-logo{height:54px;}
   .app.mobile-mode .logo-btn{padding:4px;}
   .hf-brand{gap:10px;}
-  .hf-logo{display:block; height:44px; width:auto; border-radius:8px; box-shadow:0 2px 0 rgba(15,43,43,.2), 0 0 0 1px rgba(15,43,43,.1);}
+  .hf-logo{display:block; height:56px; width:auto; filter:drop-shadow(0 2px 0 rgba(15,43,43,.16));}
   @media (prefers-reduced-motion: reduce){ .logo-btn .brand-logo.wave-spin{animation:none;} .brand-logo{transition:none;} }
 
   /* Single lesson video under a topic */
