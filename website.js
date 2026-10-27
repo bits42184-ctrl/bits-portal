@@ -703,7 +703,7 @@ function showWizardStep(stepName){
 //   You can also add `cta:'your own call-to-action text'` inside `game:{}` to change the banner text.
 
 // The three groups of conversions shown on the topic picker.
-const LEVELS = {
+const BEGINNER_SRC = {
   beginner: {
     name: 'Beginner Level',
     short: 'Beginner',
@@ -1011,83 +1011,183 @@ function arithSolution(op, a, b, res, from, to){
   return [s1, s2, s3];
 }
 
-function buildArithTopic(op, t){
+const DIFF_NAME = { easy:'Easy', medium:'Medium', hard:'Hard' };
+
+// Binary arithmetic: 20 questions of ONE difficulty. Both numbers are binary and so is the answer.
+function buildArithTopic(op, diff){
   const O = ARITH[op];
-  const rnd = seededRng(op + '|' + t.k);
-  const plan = [['easy', 20], ['medium', 20], ['hard', 20]];
-  const questions = [], seen = new Set();   // one list for the whole topic, so no pair is used twice
-  plan.forEach(([diff, count]) => {
-    const rows = [];
-    let guard = 0;
-    while(rows.length < count && guard++ < 3000){
-      const [a, b, res] = arithPair(op, diff, rnd);
-      const key = a + ',' + b;
-      if(seen.has(key) || res < 1 || (op !== 'div' && a === b)) continue;
-      seen.add(key); rows.push([a, b, res]);
-    }
-    rows.sort((x, y) => x[2] - y[2]);        // easiest first inside each level
-    rows.forEach(([a, b, res]) => {
-      const f = BASE_WORD[t.from], g = BASE_WORD[t.to];
-      const q = diff === 'easy'
-        ? `${O.verb} ${op === 'sub' ? 'these ' + f + ' numbers (first minus second)' : op === 'div' ? 'the first ' + f + ' number by the second' : 'these ' + f + ' numbers'}. Write the ${O.result} in ${g}.`
-        : diff === 'medium'
-        ? `What is the ${O.result} of these ${f} numbers? Give it in ${g}.`
-        : `Work out the ${O.result} of these ${f} numbers and write it in ${g}.`;
-      questions.push({
-        level: diff, q, num: `${arFmt(a, t.from)} ${O.show} ${arFmt(b, t.from)}`, expr: true,
-        from: t.from, to: t.to, base: t.to, answer: arFmt(res, t.to),
-        solution: arithSolution(op, a, b, res, t.from, t.to)
-      });
-    });
+  const rnd = seededRng(op + '|bin|' + diff);
+  const rows = [], seen = new Set();
+  let guard = 0;
+  while(rows.length < 20 && guard++ < 5000){
+    const [a, b, res] = arithPair(op, diff, rnd);
+    const key = a + ',' + b;
+    if(seen.has(key) || res < 1 || (op !== 'div' && a === b)) continue;
+    seen.add(key); rows.push([a, b, res]);
+  }
+  rows.sort((x, y) => x[2] - y[2]);          // easiest first
+  const questions = rows.map(([a, b, res]) => {
+    const q = diff === 'easy'
+      ? `${O.verb} ${op === 'sub' ? 'these binary numbers (first minus second)' : op === 'div' ? 'the first binary number by the second' : 'these binary numbers'}. Write the ${O.result} in binary.`
+      : diff === 'medium'
+      ? `What is the ${O.result} of these binary numbers? Give it in binary.`
+      : `Work out the ${O.result} of these binary numbers and write it in binary.`;
+    return {
+      level: diff, q, num: `${arFmt(a, 2)} ${O.show} ${arFmt(b, 2)}`, expr: true,
+      from: 2, to: 2, base: 2, answer: arFmt(res, 2), solution: arithSolution(op, a, b, res, 2, 2)
+    };
   });
 
   const [ea, eb] = O.ex, eres = op === 'add' ? ea + eb : op === 'sub' ? ea - eb : op === 'mul' ? ea * eb : ea / eb;
-  const exSol = arithSolution(op, ea, eb, eres, t.from, t.to);
-  const exExpr = `${arFmt(ea, t.from)} ${O.show} ${arFmt(eb, t.from)}`;
-  const lesson = {
-    title: `How to ${O.verb.toLowerCase()} ${BASE_WORD[t.from]} numbers and answer in ${BASE_WORD[t.to]}`,
-    idea: O.idea,
-    steps: [
-      from10steps(t.from),
-      O.step,
-      `Convert the result to ${BASE_WORD[t.to]}: ${TO_METHOD[t.to]}.`,
-      'Check your work: change your answer back to decimal and make sure it matches the result.'
-    ],
-    exTitle: `Example: ${exExpr} (${BASE_WORD[t.from]})`,
-    exLines: exSol,
-    exAnswer: `${exExpr} = ${arFmt(eres, t.to)} in ${BASE_WORD[t.to]}`,
-    tip: O.tip,
-    ref: t.ref
-  };
+  const exExpr = `${arFmt(ea, 2)} ${O.show} ${arFmt(eb, 2)}`;
+  const title = 'Binary ' + O.name;
   return {
-    key: op + '-' + t.k,
-    title: t.title,
-    sub: `${O.verb} ${BASE_WORD[t.from]} numbers, answer in ${BASE_WORD[t.to]}`,
-    icon: `${t.from}\u2192${t.to}`, small: true,
-    game: { levels: true, cta: `Think you can master ${O.name} with ${t.title}? Pick Easy, Medium or Hard, answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!`, questions },
-    lesson, resources: [],
-    focus: [`${O.name.toLowerCase()} in ${BASE_WORD[t.from]}`, `answers in ${BASE_WORD[t.to]}`]
+    key: op + '_' + diff, ck: op + '-bin', diff,
+    title,
+    sub: `${O.verb} binary numbers, answer in binary`,
+    icon: O.sym,
+    game: { cta: `Think you can master ${title} (${DIFF_NAME[diff]})? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!`, questions },
+    lesson: {
+      title: `How to ${O.verb.toLowerCase()} binary numbers`,
+      idea: O.idea,
+      steps: [
+        from10steps(2),
+        O.step,
+        `Convert the result back to binary: ${TO_METHOD[2]}.`,
+        'Check your work: change your answer back to decimal and make sure it matches the result.'
+      ],
+      exTitle: `Example: ${exExpr} (binary)`,
+      exLines: arithSolution(op, ea, eb, eres, 2, 2),
+      exAnswer: `${exExpr} = ${arFmt(eres, 2)} in binary`,
+      tip: O.tip,
+      ref: 'place'
+    },
+    resources: [],
+    focus: [`${O.name.toLowerCase()} in binary`, `${DIFF_NAME[diff]} questions`]
   };
+}
+
+/* ----- Binary conversion: 20 questions of ONE difficulty, computed by the program ----- */
+const CONV_RANGE = {
+  'bin-dec': { easy:[2, 31],   medium:[32, 127],   hard:[128, 1023] },
+  'dec-bin': { easy:[2, 31],   medium:[32, 127],   hard:[128, 1023] },
+  'bin-oct': { easy:[8, 63],   medium:[64, 511],   hard:[512, 4095] },
+  'oct-bin': { easy:[8, 63],   medium:[64, 511],   hard:[512, 4095] },
+  'bin-hex': { easy:[16, 255], medium:[256, 4095], hard:[4096, 65535] },
+  'hex-bin': { easy:[16, 255], medium:[256, 4095], hard:[4096, 65535] }
+};
+function convDigitLabel(d, base){ return (base === 16 && d >= 10) ? `${d.toString(16).toUpperCase()} (${d})` : String(d); }
+function convSolution(item, n){
+  const bin = n.toString(2), k = item.k;
+  if(k === 'bin-dec'){
+    const pv = bin.split('').map((_, i) => 2 ** (bin.length - 1 - i));
+    const ones = pv.filter((_, i) => bin[i] === '1');
+    return [
+      `Write the place values above the bits, from left to right: ${pv.join(', ')}.`,
+      `Keep the place values that sit above a 1: ${ones.join(' + ')}.`,
+      ones.length > 1 ? `Add them up: ${ones.join(' + ')} = ${n}.` : `Only one place value is left, so the answer is ${n}.`
+    ];
+  }
+  if(k === 'dec-bin'){
+    const lines = []; let x = n;
+    while(x > 0){ lines.push(`${x} \u00F7 2 = ${Math.floor(x / 2)} remainder ${x % 2}`); x = Math.floor(x / 2); }
+    return [
+      `Divide by 2 again and again, and write down each remainder: ${lines.join('; ')}.`,
+      `Read the remainders from the last one up to the first one: ${bin}.`,
+      `So ${n} in binary is ${bin}.`
+    ];
+  }
+  if(k === 'bin-oct' || k === 'bin-hex'){
+    const size = k === 'bin-oct' ? 3 : 4, to = item.to;
+    const pad = (size - bin.length % size) % size;
+    const padded = '0'.repeat(pad) + bin, groups = padded.match(new RegExp('.{' + size + '}', 'g'));
+    const ans = n.toString(to).toUpperCase();
+    return [
+      `Split the bits into groups of ${size}, starting from the right${pad ? ` (add ${pad} zero${pad > 1 ? 's' : ''} on the left to fill the first group)` : ''}: ${groups.join(' | ')}.`,
+      `Convert each group to one digit: ${groups.map(g => `${g} = ${convDigitLabel(parseInt(g, 2), to)}`).join(', ')}.`,
+      `Write the digits side by side: ${ans}.`
+    ];
+  }
+  const from = item.from, size = from === 8 ? 3 : 4, str = n.toString(from).toUpperCase();
+  const groups = str.split('').map(ch => parseInt(ch, 16).toString(2).padStart(size, '0'));
+  const joined = groups.join('');
+  return [
+    `Turn each ${BASE_WORD[from]} digit into ${size} bits: ${str.split('').map((ch, i) => `${convDigitLabel(parseInt(ch, 16), from)} = ${groups[i]}`).join(', ')}.`,
+    `Join the groups together: ${joined}.`,
+    joined === bin ? `There are no leading zeros to drop, so the answer is ${bin}.` : `Drop the zeros at the very front: ${bin}.`
+  ];
+}
+const CONV_SRC = {};
+BEGINNER_SRC.beginner.groups.forEach(g => g.topics.forEach(t => { CONV_SRC[t.key] = t; }));
+const CONV_ITEMS = {};
+CONV_GROUPS.forEach(g => g.items.forEach(it => { CONV_ITEMS[it.k] = it; }));
+
+function buildConvTopic(k, diff){
+  const item = CONV_ITEMS[k], src = CONV_SRC[k];
+  const rnd = seededRng('conv|' + k + '|' + diff);
+  const [lo, hi] = CONV_RANGE[k][diff];
+  const nums = new Set();
+  let guard = 0;
+  while(nums.size < 20 && guard++ < 5000) nums.add(lo + Math.floor(rnd() * (hi - lo + 1)));
+  const f = BASE_WORD[item.from], g = BASE_WORD[item.to];
+  const questions = [...nums].sort((x, y) => x - y).map(n => ({
+    level: diff,
+    q: diff === 'easy' ? `Convert this ${f} number to ${g}.` : diff === 'medium' ? `What is this ${f} number in ${g}?` : `Work out this ${f} number in ${g}.`,
+    num: arFmt(n, item.from), from: item.from, to: item.to, base: item.to, answer: arFmt(n, item.to),
+    solution: convSolution(item, n)
+  }));
+  return Object.assign({}, src, {
+    key: k + '_' + diff, ck: k, diff,
+    game: { cta: `Think you can master ${item.title} (${DIFF_NAME[diff]})? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!`, questions }
+  });
 }
 function from10steps(from){
   return from === 10 ? 'Both numbers are already decimal, so keep them as they are.'
                      : `Convert each ${BASE_WORD[from]} number to decimal: ${FROM_METHOD[from]}.`;
 }
 
-ARITH_ORDER.forEach(op => {
-  const O = ARITH[op];
-  LEVELS[op] = {
-    name: O.name, short: O.name, sym: O.sym, tone: O.tone, desc: O.desc,
-    intro: `Pick a conversion to open its quick lesson and ${O.name.toLowerCase()} challenge: Easy, Medium and Hard, 20 questions each.`,
-    groups: CONV_GROUPS.map(g => ({ label: g.label, tone: g.tone, topics: g.items.map(t => buildArithTopic(op, t)) }))
-  };
-});
+// Each "set" lists its topics with the difficulty assigned to it (20 questions per topic).
+const SET_ARITH = [
+  [['add','easy'],   ['sub','medium']],
+  [['add','medium'], ['sub','hard']],
+  [['add','hard'],   ['sub','easy']],
+  [['mul','easy'],   ['div','medium']],
+  [['mul','medium'], ['div','hard']],
+  [['mul','hard'],   ['div','easy']]
+];
+const SET_CONV = [
+  [['bin-dec','hard'],   ['dec-bin','easy'],   ['bin-oct','medium']],
+  [['bin-dec','easy'],   ['dec-bin','medium'], ['bin-oct','hard']],
+  [['bin-dec','medium'], ['dec-bin','hard'],   ['bin-oct','easy']],
+  [['oct-bin','hard'],   ['bin-hex','easy'],   ['hex-bin','medium']],
+  [['oct-bin','easy'],   ['bin-hex','medium'], ['hex-bin','hard']],
+  [['oct-bin','medium'], ['bin-hex','hard'],   ['hex-bin','easy']]
+];
+const SET_TONES = ['a', 'b', 'c', 'd', 'a', 'b'];
+// Inside every set the topics run Easy, then Medium, then Hard.
+const DIFF_ORDER = { easy:0, medium:1, hard:2 };
+function byDifficulty(x, y){ return DIFF_ORDER[x.diff] - DIFF_ORDER[y.diff]; }
+const SECTION_ORDER = ['arith', 'conv'];
+const LEVELS = {
+  arith: {
+    name: 'Binary Arithmetic', short: 'Arithmetic', sym: '\u00B1', tone: 'a',
+    desc: 'Add, subtract, multiply and divide binary numbers.',
+    intro: 'Six sets of binary arithmetic. Open a topic for its quick lesson, cheat sheet and a 20-question challenge.',
+    groups: SET_ARITH.map((set, i) => ({ label: 'Set ' + (i + 1), tone: SET_TONES[i], topics: set.map(([op, d]) => buildArithTopic(op, d)).sort(byDifficulty) }))
+  },
+  conv: {
+    name: 'Binary Conversion', short: 'Conversion', sym: '\u21C4', tone: 'c',
+    desc: 'Change numbers between binary, decimal, octal and hexadecimal.',
+    intro: 'Six sets of binary conversions. Open a topic for its quick lesson, cheat sheet and a 20-question challenge.',
+    groups: SET_CONV.map((set, i) => ({ label: 'Set ' + (i + 1), tone: SET_TONES[i], topics: set.map(([k, d]) => buildConvTopic(k, d)).sort(byDifficulty) }))
+  }
+};
 
-// The four section cards on the "Choose a section" screen.
+// The two section cards on the "Choose a section" screen.
 function renderSections(){
   const el = document.getElementById('sectionGrid');
   if(!el) return;
-  el.innerHTML = ARITH_ORDER.map(op => {
+  el.innerHTML = SECTION_ORDER.map(op => {
     const L = LEVELS[op];
     const topics = L.groups.flatMap(g => g.topics);
     const qs = topics.reduce((n, t) => n + t.game.questions.length, 0);
@@ -1188,7 +1288,7 @@ function showTopicResources(levelKey, topic){
   const badge = document.getElementById('resBadge');
   badge.textContent = topic.icon;
   badge.classList.toggle('res-badge-sm', topic.icon.length >= 3);
-  document.getElementById('resEyebrow').textContent = level.name;
+  document.getElementById('resEyebrow').textContent = level.name + (topic.diff ? ' \u00B7 ' + DIFF_NAME[topic.diff] : '');
   document.getElementById('resTitle').textContent = topic.title;
 
   const ICONS = {
@@ -2020,8 +2120,9 @@ function csBitSend(btn){
 /* ----- Whole cheat sheet ----- */
 function renderCheat(topic){
   const kind = topic.lesson.ref;
-  const item = CONV_GROUPS.flatMap(g => g.items).find(x => topic.key === x.k || topic.key.endsWith('-' + x.k));
-  const opKey = (topic.key.split('-')[0]), op = ARITH[opKey] ? opKey : null;
+  const ck = topic.ck || topic.key;
+  const item = CONV_GROUPS.flatMap(g => g.items).find(x => ck === x.k || ck.endsWith('-' + x.k));
+  const opKey = (ck.split('-')[0]), op = ARITH[opKey] ? opKey : null;
   const title = kind === 'place' ? 'Place values of a binary number' : kind === 'oct' ? 'Octal: digits and place values' : 'Hexadecimal: digits and place values';
   const tabs = [
     { id:'explore', icon:'\uD83D\uDD0D', label:'Explore' },
@@ -2647,7 +2748,7 @@ function gameCheck(){
   if(shapeErr){ s.fb = shapeErr + ' Fix it and press Check again.'; s.fbClass = 'bad'; renderGame(); gameFocusInput(); return; }
   s.checked = true;
   markActiveToday();
-  if(!s.useLevels && !s.logged){ s.logged = true; logGamePlay(s.topic.title, null); }
+  if(!s.useLevels && !s.logged){ s.logged = true; logGamePlay(s.topic.title, s.topic.diff || null); }
   const ok = answersMatch(s.typed, correctAnswer(q), q);
   s.results[s.idx] = ok;
   if(ok){ s.score++; s.fb = 'Correct! Great job! ⭐'; s.fbClass = 'good'; }
