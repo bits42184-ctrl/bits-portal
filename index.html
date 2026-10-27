@@ -59,10 +59,17 @@
           <svg class="sparkle" style="top:14%; right:12%; width:34px; animation-delay:.6s;" viewBox="0 0 24 24" fill="#fff"><path d="M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z"/></svg>
           <svg class="sparkle" style="bottom:34%; right:20%; width:20px; animation-delay:1.2s;" viewBox="0 0 24 24" fill="#fff"><path d="M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z"/></svg>
 
+          <div class="hero-brand" role="group" aria-label="BITS. Tap a letter to change its color.">
+            <button type="button" class="hl hl-b" data-i="0" aria-label="B, tap to change color">B</button>
+            <button type="button" class="hl hl-i" data-i="1" aria-label="I, tap to change color">I</button>
+            <button type="button" class="hl hl-t" data-i="2" aria-label="T, tap to change color">T</button>
+            <button type="button" class="hl hl-s" data-i="3" aria-label="S, tap to change color">S</button>
+          </div>
+          <div class="hero-tagline">Binary Instruction Training System</div>
+
           <h2 class="hero-heading" id="greetingHeading">Fall in love with solving problems</h2>
           <p class="hero-sub">Master binary, octal and hexadecimal, one conversion at a time. Pick a topic and let's go!</p>
-          <div class="hero-bytes" id="heroBytes" role="img" aria-label="BITS written in binary: 01000010 01001001 01010100 01010011"></div>
-          <p class="hero-bytes-note">Every letter is one byte of 8 bits. B, I, T and S are 66, 73, 84 and 83.</p>
+          <div class="hero-chips" aria-hidden="true"><span>Binary</span><span>Octal</span><span>Decimal</span><span>Hex</span></div>
           <button class="btn-3d hero-cta" onclick="openSections()"><span class="ico">✨</span> Start Learning</button>
         </div>
 
@@ -140,7 +147,53 @@
         </div>
         <p class="res-intro">Read the quick lesson, then pick Easy, Medium or Hard below. Each level has 20 questions.</p>
         <!-- Video cards for a topic go inside this container (website.js shows the set whose id matches a topic's `staticId`). -->
-        <div id="resStaticVideos"></div>
+        <div id="resStaticVideos">
+          <div class="res-video-set" id="vid-beginner-bin-hex" hidden>
+            <div class="res-more-label">Video lesson</div>
+            <div class="res-video-extra-grid one">
+              <div class="res-video-mini">
+                <div class="res-mini-frame"><iframe data-src="https://www.youtube-nocookie.com/embed/6YSKH1Hekhg" title="Binary to Hexadecimal: Easy" loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+                <div class="res-mini-info"><span class="res-tag diff-easy">Easy</span><h5>Binary to Hexadecimal</h5></div>
+              </div>
+            </div>
+          </div>
+          <div class="res-video-set" id="vid-beginner-hex-bin" hidden>
+            <div class="res-more-label">Video lesson</div>
+            <div class="res-video-extra-grid one">
+              <div class="res-video-mini">
+                <div class="res-mini-frame"><iframe data-src="https://www.youtube-nocookie.com/embed/DwJY9a6Tzqs" title="Hexadecimal to Binary: Medium" loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+                <div class="res-mini-info"><span class="res-tag diff-medium">Medium</span><h5>Hexadecimal to Binary</h5></div>
+              </div>
+            </div>
+          </div>
+          <div class="res-video-set" id="vid-beginner-oct-bin" hidden>
+            <div class="res-more-label">Video lesson</div>
+            <div class="res-video-extra-grid one">
+              <div class="res-video-mini">
+                <div class="res-mini-frame"><iframe data-src="https://www.youtube-nocookie.com/embed/11FaAd0yqKc" title="Octal to Binary: Hard" loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+                <div class="res-mini-info"><span class="res-tag diff-hard">Hard</span><h5>Octal to Binary</h5></div>
+              </div>
+            </div>
+          </div>
+          <div class="res-video-set" id="vid-mul-bin-dec" hidden>
+            <div class="res-more-label">Video lesson</div>
+            <div class="res-video-extra-grid one">
+              <div class="res-video-mini">
+                <div class="res-mini-frame"><iframe data-src="https://www.youtube-nocookie.com/embed/XXUhvwb1drU" title="Binary Multiplication: Easy" loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+                <div class="res-mini-info"><span class="res-tag diff-easy">Easy</span><h5>Binary Multiplication</h5></div>
+              </div>
+            </div>
+          </div>
+          <div class="res-video-set" id="vid-div-bin-dec" hidden>
+            <div class="res-more-label">Video lesson</div>
+            <div class="res-video-extra-grid one">
+              <div class="res-video-mini">
+                <div class="res-mini-frame"><iframe data-src="https://www.youtube-nocookie.com/embed/OxYSs96dtoM" title="Binary Division: Medium" loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
+                <div class="res-mini-info"><span class="res-tag diff-medium">Medium</span><h5>Binary Division</h5></div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div id="resBody"></div>
         <div class="res-bottom-bar">
           <div class="res-bar-group">
