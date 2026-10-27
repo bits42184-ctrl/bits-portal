@@ -1,0 +1,3277 @@
+const firebaseConfig = {
+  apiKey: "AIzaSyAGzMraQB5fYOEwwH-wDpPsQoxDk3wQEHs",
+  authDomain: "gen-math-portal.firebaseapp.com",
+  projectId: "gen-math-portal",
+  storageBucket: "gen-math-portal.firebasestorage.app",
+  messagingSenderId: "425391959827",
+  appId: "1:425391959827:web:01db158e1b3536ae43b4e6",
+  measurementId: "G-150VM9CW9K"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+// Only this exact Google account sees the Admin dashboard. Change it to YOUR email if needed.
+const ADMIN_EMAIL = "gaadrian2009@gmail.com";
+
+// Cloudinary handles actual file storage (Firebase Storage now requires billing to enable)
+const CLOUDINARY_CLOUD_NAME = "n9stqvzo";
+const CLOUDINARY_UPLOAD_PRESET = "gen_uploads";
+
+/* ---------- DATA ---------- */
+const modules = [];
+
+/* ---------- NAV ---------- */
+function goToPage(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  if(name === 'admin') loadAdminDashboard();
+  document.querySelectorAll('#navLinks button, #bottomNav button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.page===name);
+  });
+}
+document.querySelectorAll('#navLinks button, #bottomNav button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(btn.dataset.page === 'home') goHome(); else goToPage(btn.dataset.page);
+  });
+});
+
+// Takes the student to the Home page, back to its first screen (works from any page or lesson)
+function goHome(){
+  goToPage('home');
+  showWizardStep('welcome');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+/* ---------- AUTOMATIC PHONE / COMPUTER LAYOUT ---------- */
+// No button needed: the page switches layout by itself.
+// Phone layout  = narrow screens (or touch devices up to tablet size). Computer layout = everything else.
+// It also reacts live when a window is resized or a phone is rotated.
+const appEl = document.getElementById('app');
+const phoneQuery = window.matchMedia('(max-width: 820px), (pointer: coarse) and (max-width: 1024px)');
+function applyDeviceLayout(){
+  appEl.classList.toggle('mobile-mode', phoneQuery.matches);
+}
+applyDeviceLayout();
+if(phoneQuery.addEventListener) phoneQuery.addEventListener('change', applyDeviceLayout);
+else phoneQuery.addListener(applyDeviceLayout);   // older browsers
+
+/* ---------- MODULE CARDS ---------- */
+function badgeClass(strand){ return strand; }
+function renderModuleCard(m){
+  return `<div class="module-card">
+    <span class="badge ${badgeClass(m.strand)}">${m.badge}</span>
+    <h4>${m.title}</h4>
+    <p class="objective">${m.objective}</p>
+    <div class="slide-preview"><span class="dot"></span> ${Math.floor(Math.random()*6)+8} slides uploaded</div>
+    <div class="card-footer">
+      <div class="progress-mini"><div class="fill" style="width:${m.progress}%;"></div></div>
+    </div>
+  </div>`;
+}
+const emptyModulesMsg = `<p style="color:var(--ink-soft); font-size:14px; grid-column:1/-1;">No modules yet — upload a lesson file above to create one.</p>`;
+function renderAllModules(filter){
+  const list = filter==='all' ? modules : modules.filter(m=>m.strand===filter);
+  document.getElementById('allModules').innerHTML = list.map(renderModuleCard).join('') || emptyModulesMsg;
+  document.getElementById('moduleCount').textContent = list.length+' modules';
+}
+renderAllModules('all');
+document.querySelectorAll('#strandFilters button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#strandFilters button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    renderAllModules(btn.dataset.strand);
+  });
+});
+/* ---------- REAL FILE UPLOAD (Firebase Storage + Firestore) ---------- */
+function fileExtLabel(filename){
+  const ext = filename.split('.').pop().toUpperCase();
+  return ext === 'PPTX' ? 'PPT' : ext === 'DOCX' ? 'DOC' : ext;
+}
+function formatBytes(bytes){
+  return (bytes / (1024*1024)).toFixed(1) + ' MB';
+}
+
+function renderUploads(files){
+  document.getElementById('uploadList').innerHTML = files.length
+    ? files.map(f=>`
+    <div class="upload-row">
+      <div class="file-icon">${fileExtLabel(f.name)}</div>
+      <div class="meta">
+        <a href="${f.url}" target="_blank" rel="noopener" class="name" style="color:var(--ink); text-decoration:none;">${f.name}</a>
+        <div class="sub">${formatBytes(f.size)} · uploaded by ${f.uploadedBy || 'someone'}</div>
+      </div>
+      <span class="strand-tag">${f.strand}</span>
+    </div>`).join('')
+    : `<p style="color:var(--ink-soft); font-size:14px;">No files uploaded yet.</p>`;
+}
+
+// Live-updating list — refreshes automatically whenever anyone uploads a new file
+db.collection('uploads').orderBy('uploadedAt', 'desc').onSnapshot(snapshot=>{
+  const files = snapshot.docs.map(doc=>doc.data());
+  renderUploads(files);
+}, err=>{
+  console.error('Could not load uploads:', err);
+  renderUploads([]);
+});
+
+function uploadModuleFile(file){
+  const statusMsg = document.getElementById('uploadStatusMsg');
+
+  if(!currentUser){
+    statusMsg.textContent = '⚠️ Please sign in with Google before uploading a file.';
+    statusMsg.style.color = 'var(--orange-dark)';
+    return;
+  }
+
+  const strand = document.getElementById('uploadStrandSelect').value;
+
+  statusMsg.style.color = 'var(--ink-soft)';
+  statusMsg.textContent = `Uploading "${file.name}"... 0%`;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  // Cloudinary rejects "&" and other special characters in folder paths
+  function sanitizeFolderName(str){
+    return str.replace(/&/g, 'and').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+  }
+  formData.append('folder', `modules/${sanitizeFolderName(strand)}`);
+
+  // Cloudinary treats PDFs as "image" resource type, everything else as "raw"
+  const resourceType = file.name.toLowerCase().endsWith('.pdf') ? 'image' : 'raw';
+  const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType}/upload`;
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', endpoint, true);
+
+  xhr.upload.onprogress = (e)=>{
+    if(e.lengthComputable){
+      const pct = Math.round((e.loaded / e.total) * 100);
+      statusMsg.textContent = `Uploading "${file.name}"... ${pct}%`;
+    }
+  };
+
+  xhr.onload = async ()=>{
+    if(xhr.status < 200 || xhr.status >= 300){
+      console.error(xhr.responseText);
+      statusMsg.style.color = 'var(--orange-dark)';
+      statusMsg.textContent = `Upload failed — check your Cloudinary cloud name/preset.`;
+      return;
+    }
+    const data = JSON.parse(xhr.responseText);
+    await db.collection('uploads').add({
+      name: file.name,
+      strand,
+      size: file.size,
+      url: data.secure_url,
+      uploadedBy: currentUser.name,
+      uploadedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    statusMsg.style.color = '#1F8A6B';
+    statusMsg.textContent = `✅ "${file.name}" uploaded to ${strand}.`;
+  };
+
+  xhr.onerror = ()=>{
+    statusMsg.style.color = 'var(--orange-dark)';
+    statusMsg.textContent = 'Upload failed — check your internet connection.';
+  };
+
+  xhr.send(formData);
+}
+
+function handleModuleFileUpload(event){
+  const file = event.target.files[0];
+  if(file) uploadModuleFile(file);
+  event.target.value = '';
+}
+
+const dropZone = document.getElementById('dropZone');
+['dragover','dragleave','drop'].forEach(evt=>{
+  dropZone.addEventListener(evt, e=>{
+    e.preventDefault();
+    dropZone.classList.toggle('drag', evt==='dragover');
+    if(evt==='drop' && e.dataTransfer.files.length){
+      uploadModuleFile(e.dataTransfer.files[0]);
+    }
+  });
+});
+/* ---------- ACCORDION ---------- */
+function toggleAccordion(headEl){
+  headEl.parentElement.classList.toggle('open');
+}
+
+/* ---------- REAL GOOGLE SIGN-IN (FIREBASE) ---------- */
+let currentUser = null;   // {uid, email, name}
+let pendingFirebaseUser = null;
+
+function getInitials(name){
+  const parts = name.trim().split(/\s+/);
+  return parts.length>1 ? (parts[0][0]+parts[1][0]).toUpperCase() : parts[0].slice(0,2).toUpperCase();
+}
+
+function signInWithGoogle(){
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(err=>{
+    console.error(err);
+    alert("Sign-in didn't go through: " + err.message + "\n\n(Make sure this page is open at http://localhost, not opened directly as a file.)");
+  });
+}
+
+function handleUserChipClick(){
+  if(confirm("Sign out of BITS?")) auth.signOut();
+}
+
+function profileAction(){
+  if(currentUser) auth.signOut();
+  else signInWithGoogle();
+}
+
+/* ================= CLASS SECTION (ICT - A / ICT - B) =================
+   Students pick the class they belong to (Home page and Profile page). It is saved on their account as
+   users/{uid}.classSection, so the Admin tab can group students by section and show each section's recent activity.
+   To add another class later, just add it to this list, for example 'ICT - C'. */
+const CLASS_SECTIONS = ['ICT - A', 'ICT - B'];
+const CLASS_PENDING_KEY = 'bitsClassSectionPending';   // only used when a student picks BEFORE signing in
+let classSection = null;
+
+function classPendingGet(){ try{ const v = localStorage.getItem(CLASS_PENDING_KEY); return CLASS_SECTIONS.indexOf(v) >= 0 ? v : null; }catch(_){ return null; } }
+function classPendingSet(v){ try{ if(v) localStorage.setItem(CLASS_PENDING_KEY, v); else localStorage.removeItem(CLASS_PENDING_KEY); }catch(_){} }
+
+function renderClassPickers(){
+  document.querySelectorAll('.class-pick').forEach(box => {
+    const opts = box.querySelector('.cp-options'), note = box.querySelector('.cp-note');
+    box.classList.toggle('need', !classSection);
+    if(opts) opts.innerHTML = CLASS_SECTIONS.map(label => {
+      const on = label === classSection, letter = label.split(' - ').pop();
+      return `<button type="button" class="cp-opt ${on ? 'on' : ''}" role="radio" aria-checked="${on}" data-sec="${escapeHtml(label)}" onclick="setClassSection(this.dataset.sec)">
+        <span class="cp-letter" aria-hidden="true">${escapeHtml(letter)}</span>
+        <span class="cp-name">${escapeHtml(label)}</span>
+        <span class="cp-check" aria-hidden="true">\u2713</span>
+      </button>`;
+    }).join('');
+    if(note){
+      note.classList.remove('err');
+      note.textContent = !classSection ? '\uD83D\uDC46 Tap your class section so your teacher can follow your progress.'
+        : currentUser ? `\u2705 You are in ${classSection}. Picked the wrong one? Tap another section to change it.`
+        : `You picked ${classSection}. Sign in with Google so your teacher can see your progress.`;
+    }
+  });
+}
+
+async function setClassSection(label){
+  if(CLASS_SECTIONS.indexOf(label) < 0 || label === classSection) return;
+  const prev = classSection;
+  classSection = label; renderClassPickers();
+  if(!currentUser){ classPendingSet(label); return; }
+  try{
+    await db.collection('users').doc(currentUser.uid).set({ classSection: label, classSectionAt: Date.now() }, {merge:true});
+    logActivity('class_selected', prev ? `${label} (was ${prev})` : label, { classSection: label });
+  }catch(err){
+    console.error(err);
+    classSection = prev; renderClassPickers();
+    document.querySelectorAll('.class-pick .cp-note').forEach(n => { n.textContent = 'Could not save your class section. Check your connection and try again.'; n.classList.add('err'); });
+  }
+}
+
+// Called right after a student signs in: use the saved section, or save the one they picked before signing in.
+function classSectionOnSignIn(data){
+  const saved = data && CLASS_SECTIONS.indexOf(data.classSection) >= 0 ? data.classSection : null;
+  const pending = classPendingGet();
+  if(saved){ classSection = saved; classPendingSet(null); }
+  else if(pending){
+    classSection = pending; classPendingSet(null);
+    db.collection('users').doc(currentUser.uid).set({ classSection: pending, classSectionAt: Date.now() }, {merge:true})
+      .then(() => logActivity('class_selected', pending, { classSection: pending })).catch(console.error);
+  } else classSection = null;
+  renderClassPickers();
+}
+function classSectionOnSignOut(){ classSection = classPendingGet(); renderClassPickers(); }
+
+classSection = classPendingGet();
+renderClassPickers();
+
+// Fires automatically whenever sign-in state changes (page load, login, logout)
+auth.onAuthStateChanged(async (user)=>{
+  if(user){
+    const docRef = db.collection('users').doc(user.uid);
+    const snap = await docRef.get();
+    if(!snap.exists){
+      // first time signing in — ask what name to show
+      pendingFirebaseUser = user;
+      document.getElementById('modalEmailShown').textContent = user.email;
+      document.getElementById('loginName').value = user.displayName || '';
+      document.getElementById('loginError').classList.remove('show');
+      document.getElementById('loginModalOverlay').classList.add('show');
+    } else {
+      const data = snap.data();
+      currentUser = {uid:user.uid, email:user.email, name:data.displayName};
+      const streak = await syncDailyStreak(user.uid, data);
+      applySignedInUI(data.displayName, user.email, data.moduleProgress || {}, streak);
+
+      // restore this account's saved theme + notification preference
+      if(typeof data.themeIndex === 'number' && data.themeIndex !== themeIndex){
+        applyThemeInstant(data.themeIndex);
+      }
+      document.getElementById('notifToggle').setAttribute('aria-checked', data.notificationsEnabled !== false);
+      db.collection('users').doc(user.uid).set({lastSeenAt: Date.now()}, {merge:true}).catch(console.error);
+      updateAdminAccess(user.email);
+      classSectionOnSignIn(data);
+      loadActiveDaysForUser(user.uid, data);
+    }
+  } else {
+    currentUser = null;
+    activeDays = new Set(); loadLocalDays(); markActiveToday();
+    showSignedOutUI();
+  }
+});
+
+// DAILY STREAK: a day counts as "active" when the student opens the app (or practices) that day.
+// Using the app on consecutive days raises the streak by 1. Missing a whole day drops it back to 0
+// (it starts again at 1 the next time they open the app). The streak is always worked out from the
+// saved list of active days (users/{uid}.activeDays), so it can go up AND down.
+async function syncDailyStreak(uid, data){
+  const today = dayKey(new Date());
+  activeDays = new Set(Array.isArray(data.activeDays) ? data.activeDays : []);
+  activeDays.add(today);
+  const streak = calcStreaks().current;
+  try{
+    await db.collection('users').doc(uid).set({
+      activeDays: firebase.firestore.FieldValue.arrayUnion(today),
+      streak, lastLoginTimestamp: Date.now()
+    }, {merge:true});
+  }catch(e){ console.error(e); }
+  return streak;
+}
+
+async function confirmDisplayName(){
+  const nameInput = document.getElementById('loginName').value.trim();
+  const errorBox = document.getElementById('loginError');
+  if(!nameInput){
+    errorBox.classList.add('show');
+    return;
+  }
+  const user = pendingFirebaseUser;
+  await db.collection('users').doc(user.uid).set({
+    displayName: nameInput,
+    email: user.email,
+    moduleProgress: {},
+    streak: 1,
+    activeDays: [dayKey(new Date())],
+    lastLoginTimestamp: Date.now(),
+    lastSeenAt: Date.now(),
+    themeIndex: 0,
+    notificationsEnabled: true,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, {merge:true});
+
+  currentUser = {uid:user.uid, email:user.email, name:nameInput};
+  activeDays = new Set([dayKey(new Date())]);
+  renderStreakCalendar();
+  applySignedInUI(nameInput, user.email, {}, 1);
+  document.getElementById('notifToggle').setAttribute('aria-checked', 'true');
+  updateAdminAccess(user.email);
+  classSectionOnSignIn({});
+  document.getElementById('loginModalOverlay').classList.remove('show');
+}
+
+function applySignedInUI(displayName, email, moduleProgress, streak){
+  const initials = getInitials(displayName);
+  document.getElementById('googleSignInBtn').style.display = 'none';
+  const chip = document.getElementById('userChip');
+  chip.style.display = 'flex';
+  document.getElementById('navAvatar').textContent = initials;
+  document.getElementById('navUname').innerHTML = displayName + `<span class="sub">${email}</span>`;
+  document.getElementById('greetingHeading').textContent = `Hey ${displayName}! Ready to keep your streak going?`;
+  document.getElementById('profileAvatar').textContent = initials;
+  document.getElementById('profileName').textContent = displayName;
+  document.getElementById('profileEmail').textContent = email;
+  document.getElementById('profileSignInBtn').textContent = 'Sign out';
+  document.getElementById('editNameBtn').style.display = 'inline-block';
+
+  document.getElementById('statStreak').textContent = streak;
+
+  // apply this user's saved progress onto the shared module list, then re-render
+  modules.forEach(m=>{
+    if(moduleProgress[m.title] !== undefined) m.progress = moduleProgress[m.title];
+  });
+  renderAllModules(document.querySelector('#strandFilters button.active')?.dataset.strand || 'all');
+}
+
+function showSignedOutUI(){
+  updateAdminAccess(null);
+  classSectionOnSignOut();
+  document.getElementById('googleSignInBtn').style.display = 'flex';
+  document.getElementById('userChip').style.display = 'none';
+  document.getElementById('greetingHeading').textContent = 'Fall in love with solving problems';
+  document.getElementById('profileAvatar').textContent = '?';
+  document.getElementById('profileName').textContent = 'Not signed in';
+  document.getElementById('profileEmail').textContent = 'Sign in with Google to save your progress';
+  document.getElementById('profileSignInBtn').textContent = 'Sign in with Google';
+  document.getElementById('editNameBtn').style.display = 'none';
+  cancelEditingName();
+  document.getElementById('statStreak').textContent = '0';
+  document.getElementById('notifToggle').setAttribute('aria-checked', 'true');
+}
+
+/* ---------- Edit display name ---------- */
+function startEditingName(){
+  if(!currentUser) return;
+  document.getElementById('profileNameInput').value = currentUser.name;
+  document.getElementById('profileNameDisplay').style.display = 'none';
+  document.getElementById('profileNameEditRow').style.display = 'flex';
+  document.getElementById('profileNameInput').focus();
+}
+function cancelEditingName(){
+  document.getElementById('profileNameDisplay').style.display = 'flex';
+  document.getElementById('profileNameEditRow').style.display = 'none';
+}
+async function saveEditedName(){
+  const newName = document.getElementById('profileNameInput').value.trim();
+  if(!newName || !currentUser) return;
+
+  await db.collection('users').doc(currentUser.uid).set({displayName: newName}, {merge:true});
+  currentUser.name = newName;
+
+  const initials = getInitials(newName);
+  document.getElementById('navAvatar').textContent = initials;
+  document.getElementById('navUname').innerHTML = newName + `<span class="sub">${currentUser.email}</span>`;
+  document.getElementById('profileAvatar').textContent = initials;
+  document.getElementById('profileName').textContent = newName;
+  document.getElementById('greetingHeading').textContent = `Hey ${newName}! Ready to keep your streak going?`;
+
+  cancelEditingName();
+}
+
+// ----- Per-user persistence: module progress + quiz results -----
+async function saveModuleProgress(title, progress){
+  if(!currentUser) return;
+  await db.collection('users').doc(currentUser.uid).set({
+    moduleProgress: { [title]: progress }
+  }, {merge:true});
+}
+
+/* ---------- THEME SWITCHER ---------- */
+const themes = [
+  { name:"Calm Teal", paper:"#FAF9F4", surface:"#EFF3EE", surface2:"#E4EEEA", ink:"#1E3A3A", inkSoft:"#4A6363", primary:"#3D8A8A", primaryDark:"#2C6666", accent:"#F2A65A", accentDark:"#D98A3D", yellow:"#FFD873", line:"#D8E0DA" },
+  { name:"Coral Sunset", paper:"#FFF8F3", surface:"#FDEDE3", surface2:"#FCE1D0", ink:"#4A2E23", inkSoft:"#8C6952", primary:"#E8734A", primaryDark:"#C65934", accent:"#4AA8A8", accentDark:"#368585", yellow:"#FFDDA8", line:"#F0DCCB" },
+  { name:"Violet Mint", paper:"#F8F6FC", surface:"#EDE8F8", surface2:"#E1D8F3", ink:"#2E2350", inkSoft:"#6F63A0", primary:"#7C5CD6", primaryDark:"#5F42B8", accent:"#3FBFA0", accentDark:"#2FA089", yellow:"#FFE066", line:"#DDD4F0" },
+  { name:"Sunny Blue", paper:"#F5FAFF", surface:"#E8F2FC", surface2:"#D9EAFA", ink:"#133A5E", inkSoft:"#4C7A9E", primary:"#2E86DE", primaryDark:"#1F65AE", accent:"#F2A65A", accentDark:"#D98A3D", yellow:"#FFE38A", line:"#CFE3F5" },
+  { name:"Rose Blush", paper:"#FFF5F7", surface:"#FDE8ED", surface2:"#FBDAE3", ink:"#4A1F2B", inkSoft:"#8C5568", primary:"#E0568C", primaryDark:"#B83E6E", accent:"#4FBFA0", accentDark:"#35A085", yellow:"#FFE08A", line:"#F5D5DE" },
+  { name:"Forest Moss", paper:"#F6FAF3", surface:"#E9F3E1", surface2:"#DCECD0", ink:"#1E3620", inkSoft:"#5C7A5F", primary:"#5B8C3E", primaryDark:"#456B2E", accent:"#E8A33D", accentDark:"#C6862A", yellow:"#FFE38A", line:"#D3E5C6" },
+  { name:"Midnight Indigo", paper:"#F4F5FB", surface:"#E7E9F7", surface2:"#D9DCF2", ink:"#1B1F3B", inkSoft:"#5B5F8A", primary:"#4A4FD6", primaryDark:"#3739AD", accent:"#3DC4D6", accentDark:"#2CA3B3", yellow:"#FFDD75", line:"#D5D8F0" }
+];
+let themeIndex = 0;
+
+function applyTheme(t){
+  const root = document.documentElement.style;
+  root.setProperty('--paper', t.paper);
+  root.setProperty('--surface', t.surface);
+  root.setProperty('--surface-2', t.surface2);
+  root.setProperty('--ink', t.ink);
+  root.setProperty('--ink-soft', t.inkSoft);
+  root.setProperty('--teal', t.primary);
+  root.setProperty('--teal-dark', t.primaryDark);
+  root.setProperty('--orange', t.accent);
+  root.setProperty('--orange-dark', t.accentDark);
+  root.setProperty('--yellow', t.yellow);
+  root.setProperty('--line', t.line);
+}
+
+function cycleTheme(e){
+  goToTheme((themeIndex + 1) % themes.length);
+}
+
+function selectTheme(index){
+  if(index === themeIndex) return;
+  goToTheme(index);
+}
+
+function goToTheme(targetIndex){
+  const nextTheme = themes[targetIndex];
+
+  // flowing-wave flourish on the logo icon
+  const wave = document.getElementById('wavePath');
+  wave.classList.remove('wave-spin');
+  void wave.offsetWidth; // restart animation
+  wave.classList.add('wave-spin');
+
+  // ripple that expands from the logo and reveals the new palette
+  const btn = document.getElementById('logoBtn');
+  const rect = btn.getBoundingClientRect();
+  const cx = rect.left + rect.width/2;
+  const cy = rect.top + rect.height/2;
+  const maxDist = Math.hypot(
+    Math.max(cx, window.innerWidth - cx),
+    Math.max(cy, window.innerHeight - cy)
+  ) * 2.15;
+
+  const ripple = document.createElement('div');
+  ripple.className = 'theme-ripple';
+  ripple.style.left = cx + 'px';
+  ripple.style.top = cy + 'px';
+  ripple.style.width = maxDist + 'px';
+  ripple.style.height = maxDist + 'px';
+  ripple.style.background = nextTheme.primary;
+  document.body.appendChild(ripple);
+
+  requestAnimationFrame(()=>{
+    ripple.style.opacity = '0.9';
+    ripple.style.transform = 'translate(-50%,-50%) scale(1)';
+  });
+
+  const appEl2 = document.getElementById('app');
+  appEl2.classList.add('theme-transition');
+
+  setTimeout(()=>{
+    applyTheme(nextTheme);
+    themeIndex = targetIndex;
+    updateActiveSwatch();
+    if(currentUser){
+      db.collection('users').doc(currentUser.uid).set({themeIndex}, {merge:true}).catch(console.error);
+    }
+  }, 300);
+
+  setTimeout(()=>{
+    ripple.style.opacity = '0';
+  }, 620);
+
+  setTimeout(()=>{
+    ripple.remove();
+    appEl2.classList.remove('theme-transition');
+  }, 1100);
+}
+
+// Instantly apply a theme with no ripple/animation — used when loading a signed-in user's saved preference
+function applyThemeInstant(targetIndex){
+  themeIndex = targetIndex;
+  applyTheme(themes[targetIndex]);
+  updateActiveSwatch();
+}
+
+function populateThemeSwatches(){
+  const row = document.getElementById('themeSwatchRow');
+  if(!row) return;
+  row.innerHTML = themes.map((t,i)=>
+    `<button class="theme-swatch" title="${t.name}" style="background:linear-gradient(135deg, ${t.primary}, ${t.accent});" onclick="selectTheme(${i})"></button>`
+  ).join('');
+  updateActiveSwatch();
+}
+function updateActiveSwatch(){
+  document.querySelectorAll('.theme-swatch').forEach((el,i)=>{
+    el.classList.toggle('active', i === themeIndex);
+  });
+}
+populateThemeSwatches();
+
+/* ---------- Notification toggle (real setting, persisted per account) ---------- */
+function toggleNotifications(){
+  const btn = document.getElementById('notifToggle');
+  const newState = btn.getAttribute('aria-checked') !== 'true';
+  btn.setAttribute('aria-checked', newState);
+  if(currentUser){
+    db.collection('users').doc(currentUser.uid).set({notificationsEnabled: newState}, {merge:true}).catch(console.error);
+  }
+}
+
+/* ================= CUSTOM CURSOR — icon badge that morphs per target ================= */
+(function initCustomCursor(){
+  const isTouchDevice = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+  if(isTouchDevice){
+    document.body.classList.add('no-custom-cursor');
+    return;
+  }
+  document.body.classList.add('custom-cursor-active');
+
+  const badge = document.getElementById('cursorBadge');
+  const icon = document.getElementById('cursorIcon');
+
+  // Original, simple line-icons (not copied from any reference) — one per state
+  const ICONS = {
+    default:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2 8 8 2-8 2-2 8-2-8-8-2 8-2z"/></svg>',
+    click:    '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="9" y="9" width="6" height="12" rx="3"/><circle cx="12" cy="6" r="3.2"/></svg>',
+    upload:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11l17-8-6 17-3-7-8-2z"/></svg>',
+    drop:     '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 11l17-8-6 17-3-7-8-2z"/></svg>',
+    cta:      '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>',
+    disabled: '<svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>'
+  };
+  icon.innerHTML = ICONS.default;
+
+  document.addEventListener('mousemove', (e)=>{
+    // Direct 1:1 positioning — no easing, no pull toward elements, zero lag
+    badge.style.left = e.clientX + 'px';
+    badge.style.top = e.clientY + 'px';
+  });
+
+  // Selectors, checked in priority order (most specific first)
+  const SEL_DISABLED = 'button:disabled, [aria-disabled="true"]';
+  const SEL_TEXT     = 'textarea, input:not([type="file"])';
+  const SEL_DROPZONE = '.lecture-upload-zone, .upload-zone';
+  const SEL_CTA      = '.hero-cta';
+  const SEL_CLICK    = 'button, a, select, .module-card, .lecture-card, .input-choice-card, .quiz-option, .theme-swatch, .toggle-switch, [onclick]';
+
+  const STATE_CONFIG = [
+    {selector: SEL_DISABLED, state: 'state-disabled', icon: ICONS.disabled},
+    {selector: SEL_TEXT,     state: 'state-text',     icon: ''},
+    {selector: SEL_DROPZONE, state: 'state-upload',   icon: ICONS.upload},
+    {selector: SEL_CTA,      state: 'state-cta',      icon: ICONS.cta},
+    {selector: SEL_CLICK,    state: 'state-click',    icon: ICONS.click},
+  ];
+  const ALL_STATES = STATE_CONFIG.map(c=>c.state).concat('state-drop');
+
+  function setCursorState(config){
+    ALL_STATES.forEach(s=> badge.classList.remove(s));
+    if(config){
+      badge.classList.add(config.state);
+      icon.innerHTML = config.icon;
+    } else {
+      icon.innerHTML = ICONS.default;
+    }
+  }
+
+  function matchState(target){
+    for(const config of STATE_CONFIG){
+      const el = target.closest(config.selector);
+      if(el) return {config, el};
+    }
+    return null;
+  }
+
+  document.addEventListener('mouseover', (e)=>{
+    const match = matchState(e.target);
+    if(match) setCursorState(match.config);
+  });
+  document.addEventListener('mouseout', (e)=>{
+    const stillInside = e.relatedTarget && matchState(e.relatedTarget);
+    if(!stillInside) setCursorState(null);
+  });
+
+  // Dragging a file over any drop zone overrides everything with the "drop here" state
+  document.querySelectorAll(SEL_DROPZONE).forEach(zone=>{
+    zone.addEventListener('dragover', ()=>{
+      ALL_STATES.forEach(s=> badge.classList.remove(s));
+      badge.classList.add('state-drop');
+      icon.innerHTML = ICONS.drop;
+    });
+    zone.addEventListener('dragleave', ()=>{
+      if(zone.matches(':hover')) setCursorState({state:'state-upload', icon:ICONS.upload});
+      else setCursorState(null);
+    });
+    zone.addEventListener('drop', ()=> setCursorState(null));
+  });
+
+  // Real expanding ripple on click, spawned at the exact click point
+  document.addEventListener('mousedown', (e)=>{
+    const ripple = document.createElement('div');
+    ripple.className = 'click-ripple';
+    ripple.style.left = e.clientX + 'px';
+    ripple.style.top = e.clientY + 'px';
+    document.body.appendChild(ripple);
+    ripple.addEventListener('animationend', ()=> ripple.remove());
+  });
+})();
+
+/*
+  To swap in an image-based cursor later instead of this CSS/HTML one, you'd
+  set it natively on the body, e.g.:
+    body.custom-cursor-active { cursor: url("cursor.png") 12 12, auto !important; }
+  and remove the `cursor:none` rule + the #cursorBadge element.
+  Everything above is structured as a drop-in replacement for that.
+*/
+
+/* ================= HERO: "BITS" written in binary ================= */
+(function buildHeroBytes(){
+  const el = document.getElementById('heroBytes');
+  if(!el) return;
+  el.innerHTML = 'BITS'.split('').map(ch => {
+    const bits = ch.charCodeAt(0).toString(2).padStart(8, '0');
+    const cells = bits.split('').map(b => `<i class="hb-bit b${b}">${b}</i>`).join('');
+    return `<div class="hb"><div class="hb-bits">${cells}</div><span class="hb-ch">${ch}</span></div>`;
+  }).join('');
+})();
+
+/* ================= HOME PAGE FLOW: Start Learning -> pick a level -> quiz ================= */
+// Hides every YouTube lesson card and unloads its player so nothing keeps playing in the background.
+function stopAllLessonVideos(){
+  document.querySelectorAll('#resStaticVideos > *').forEach(el => {
+    el.hidden = true;
+    el.querySelectorAll('iframe').forEach(f => f.removeAttribute('src'));
+  });
+}
+
+function showWizardStep(stepName){
+  if(stepName !== 'resources') stopAllLessonVideos();
+  document.querySelectorAll('.wizard-step').forEach(s=>s.classList.remove('active'));
+  document.getElementById('step-' + stepName).classList.add('active');
+}
+
+// MINI GAME FORMAT (each topic has a `game:{ questions:[] }` slot):
+//   { level:'easy'|'medium'|'hard', q:'Question text', num:'1011', from:2, to:10, answer:'11', solution:['Step 1 ...','Step 2 ...','Step 3 ...'] }
+//   Students TYPE their answer. `num` is the number being converted (shown in the big conversion display),
+//   `from` / `to` are the bases (2, 8, 10 or 16). Binary, octal and hex answers ignore leading zeros and upper/lower case.
+//   Each question's `level` only changes the little difficulty tag. Add `levels:true` inside `game:{}` to show a difficulty picker instead.
+//   `lesson:{}` on a topic is the "Quick lesson" card shown above the game (idea, steps, worked example, cheat sheet).
+//   You can also add `cta:'your own call-to-action text'` inside `game:{}` to change the banner text.
+
+// The three groups of conversions shown on the topic picker.
+const LEVELS = {
+  beginner: {
+    name: 'Beginner Level',
+    short: 'Beginner',
+    difficulty: 'easy',
+    groups: [
+      { label: "Binary and decimal", tone: 'a', topics: [
+        { key:"bin-dec", title:"Binary to Decimal", sub:"Add up the place values", icon:"2→10", small:true,
+          game:{ cta:"Think you can master Binary to Decimal? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+            // ---------- EASY (7 questions) ----------
+            {"level": "easy", "q": "Convert this binary number to decimal.", "num": "101", "from": 2, "to": 10, "base": 10, "answer": "5", "solution": ["Write the place values above the bits, from left to right: 4, 2, 1.", "Keep only the place values that sit above a 1: 4, 1.", "Add them up: 4 + 1 = 5."]},
+            {"level": "easy", "q": "Convert this binary number to decimal.", "num": "110", "from": 2, "to": 10, "base": 10, "answer": "6", "solution": ["Write the place values above the bits, from left to right: 4, 2, 1.", "Keep only the place values that sit above a 1: 4, 2.", "Add them up: 4 + 2 = 6."]},
+            {"level": "easy", "q": "Convert this binary number to decimal.", "num": "111", "from": 2, "to": 10, "base": 10, "answer": "7", "solution": ["Write the place values above the bits, from left to right: 4, 2, 1.", "Keep only the place values that sit above a 1: 4, 2, 1.", "Add them up: 4 + 2 + 1 = 7."]},
+            {"level": "easy", "q": "Convert this binary number to decimal.", "num": "1001", "from": 2, "to": 10, "base": 10, "answer": "9", "solution": ["Write the place values above the bits, from left to right: 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 8, 1.", "Add them up: 8 + 1 = 9."]},
+            {"level": "easy", "q": "Convert this binary number to decimal.", "num": "1010", "from": 2, "to": 10, "base": 10, "answer": "10", "solution": ["Write the place values above the bits, from left to right: 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 8, 2.", "Add them up: 8 + 2 = 10."]},
+            {"level": "easy", "q": "Convert this binary number to decimal.", "num": "1100", "from": 2, "to": 10, "base": 10, "answer": "12", "solution": ["Write the place values above the bits, from left to right: 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 8, 4.", "Add them up: 8 + 4 = 12."]},
+            {"level": "easy", "q": "Convert this binary number to decimal.", "num": "1111", "from": 2, "to": 10, "base": 10, "answer": "15", "solution": ["Write the place values above the bits, from left to right: 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 8, 4, 2, 1.", "Add them up: 8 + 4 + 2 + 1 = 15."]},
+            // ---------- MEDIUM (7 questions) ----------
+            {"level": "medium", "q": "What is this binary number in decimal?", "num": "10010", "from": 2, "to": 10, "base": 10, "answer": "18", "solution": ["Write the place values above the bits, from left to right: 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 16, 2.", "Add them up: 16 + 2 = 18."]},
+            {"level": "medium", "q": "What is this binary number in decimal?", "num": "10101", "from": 2, "to": 10, "base": 10, "answer": "21", "solution": ["Write the place values above the bits, from left to right: 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 16, 4, 1.", "Add them up: 16 + 4 + 1 = 21."]},
+            {"level": "medium", "q": "What is this binary number in decimal?", "num": "11001", "from": 2, "to": 10, "base": 10, "answer": "25", "solution": ["Write the place values above the bits, from left to right: 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 16, 8, 1.", "Add them up: 16 + 8 + 1 = 25."]},
+            {"level": "medium", "q": "What is this binary number in decimal?", "num": "11111", "from": 2, "to": 10, "base": 10, "answer": "31", "solution": ["Write the place values above the bits, from left to right: 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 16, 8, 4, 2, 1.", "Add them up: 16 + 8 + 4 + 2 + 1 = 31."]},
+            {"level": "medium", "q": "What is this binary number in decimal?", "num": "100000", "from": 2, "to": 10, "base": 10, "answer": "32", "solution": ["Write the place values above the bits, from left to right: 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 32.", "There is just one 1, so the answer is 32."]},
+            {"level": "medium", "q": "What is this binary number in decimal?", "num": "101101", "from": 2, "to": 10, "base": 10, "answer": "45", "solution": ["Write the place values above the bits, from left to right: 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 32, 8, 4, 1.", "Add them up: 32 + 8 + 4 + 1 = 45."]},
+            {"level": "medium", "q": "What is this binary number in decimal?", "num": "110011", "from": 2, "to": 10, "base": 10, "answer": "51", "solution": ["Write the place values above the bits, from left to right: 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 32, 16, 2, 1.", "Add them up: 32 + 16 + 2 + 1 = 51."]},
+            // ---------- HARD (6 questions) ----------
+            {"level": "hard", "q": "A computer stores the letter A as this byte. What decimal code is that?", "num": "01000001", "from": 2, "to": 10, "base": 10, "answer": "65", "solution": ["Write the place values above the bits, from left to right: 128, 64, 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 64, 1.", "Add them up: 64 + 1 = 65."]},
+            {"level": "hard", "q": "Convert this byte to decimal.", "num": "10101010", "from": 2, "to": 10, "base": 10, "answer": "170", "solution": ["Write the place values above the bits, from left to right: 128, 64, 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 128, 32, 8, 2.", "Add them up: 128 + 32 + 8 + 2 = 170."]},
+            {"level": "hard", "q": "Convert this byte to decimal.", "num": "11001000", "from": 2, "to": 10, "base": 10, "answer": "200", "solution": ["Write the place values above the bits, from left to right: 128, 64, 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 128, 64, 8.", "Add them up: 128 + 64 + 8 = 200."]},
+            {"level": "hard", "q": "Only the leftmost bit of this byte is on. What is its decimal value?", "num": "10000000", "from": 2, "to": 10, "base": 10, "answer": "128", "solution": ["Write the place values above the bits, from left to right: 128, 64, 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 128.", "There is just one 1, so the answer is 128."]},
+            {"level": "hard", "q": "Convert this byte to decimal.", "num": "11011011", "from": 2, "to": 10, "base": 10, "answer": "219", "solution": ["Write the place values above the bits, from left to right: 128, 64, 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 128, 64, 16, 8, 2, 1.", "Add them up: 128 + 64 + 16 + 8 + 2 + 1 = 219."]},
+            {"level": "hard", "q": "This is the biggest value one byte can hold. What is it in decimal?", "num": "11111111", "from": 2, "to": 10, "base": 10, "answer": "255", "solution": ["Write the place values above the bits, from left to right: 128, 64, 32, 16, 8, 4, 2, 1.", "Keep only the place values that sit above a 1: 128, 64, 32, 16, 8, 4, 2, 1.", "Add them up: 128 + 64 + 32 + 16 + 8 + 4 + 2 + 1 = 255."]},
+          ] },
+          lesson:{"title": "How to convert binary to decimal", "idea": "Every bit has a place value, and the values double as you move left: 1, 2, 4, 8, 16 and so on. Add up the place values of the bits that are 1.", "steps": ["Write the place values above the bits. Start with 1 on the far right and double each step to the left.", "Ignore the place values that sit above a 0.", "Add the place values that sit above a 1.", "The total is your decimal number."], "exTitle": "Example: convert 10110 to decimal", "exLines": ["Place values: 16, 8, 4, 2, 1", "Bits: 1, 0, 1, 1, 0", "Keep 16, 4 and 2 (the bits that are 1)", "16 + 4 + 2 = 22"], "exAnswer": "10110 in binary = 22 in decimal", "tip": "Memorize the powers of 2: 1, 2, 4, 8, 16, 32, 64, 128.", "ref": "place"},
+          resources:[],
+          focus:["adding place values of bits that are 1", "bytes up to 255"] },
+        { key:"dec-bin", title:"Decimal to Binary", sub:"Divide by 2, read the remainders", icon:"10→2", small:true,
+          game:{ cta:"Think you can master Decimal to Binary? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+            // ---------- EASY (7 questions) ----------
+            {"level": "easy", "q": "Convert this decimal number to binary.", "num": "3", "from": 10, "to": 2, "base": 2, "answer": "11", "solution": ["Divide by 2 again and again, keeping each remainder: 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1.", "So 3 in binary is 11."]},
+            {"level": "easy", "q": "Convert this decimal number to binary.", "num": "5", "from": 10, "to": 2, "base": 2, "answer": "101", "solution": ["Divide by 2 again and again, keeping each remainder: 5 ÷ 2 = 2 remainder 1; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 1.", "So 5 in binary is 101."]},
+            {"level": "easy", "q": "Convert this decimal number to binary.", "num": "6", "from": 10, "to": 2, "base": 2, "answer": "110", "solution": ["Divide by 2 again and again, keeping each remainder: 6 ÷ 2 = 3 remainder 0; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 0.", "So 6 in binary is 110."]},
+            {"level": "easy", "q": "Convert this decimal number to binary.", "num": "9", "from": 10, "to": 2, "base": 2, "answer": "1001", "solution": ["Divide by 2 again and again, keeping each remainder: 9 ÷ 2 = 4 remainder 1; 4 ÷ 2 = 2 remainder 0; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 0 1.", "So 9 in binary is 1001."]},
+            {"level": "easy", "q": "Convert this decimal number to binary.", "num": "10", "from": 10, "to": 2, "base": 2, "answer": "1010", "solution": ["Divide by 2 again and again, keeping each remainder: 10 ÷ 2 = 5 remainder 0; 5 ÷ 2 = 2 remainder 1; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 1 0.", "So 10 in binary is 1010."]},
+            {"level": "easy", "q": "Convert this decimal number to binary.", "num": "12", "from": 10, "to": 2, "base": 2, "answer": "1100", "solution": ["Divide by 2 again and again, keeping each remainder: 12 ÷ 2 = 6 remainder 0; 6 ÷ 2 = 3 remainder 0; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 0 0.", "So 12 in binary is 1100."]},
+            {"level": "easy", "q": "Convert this decimal number to binary.", "num": "15", "from": 10, "to": 2, "base": 2, "answer": "1111", "solution": ["Divide by 2 again and again, keeping each remainder: 15 ÷ 2 = 7 remainder 1; 7 ÷ 2 = 3 remainder 1; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 1 1.", "So 15 in binary is 1111."]},
+            // ---------- MEDIUM (7 questions) ----------
+            {"level": "medium", "q": "What is this decimal number in binary?", "num": "18", "from": 10, "to": 2, "base": 2, "answer": "10010", "solution": ["Divide by 2 again and again, keeping each remainder: 18 ÷ 2 = 9 remainder 0; 9 ÷ 2 = 4 remainder 1; 4 ÷ 2 = 2 remainder 0; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 0 1 0.", "So 18 in binary is 10010."]},
+            {"level": "medium", "q": "What is this decimal number in binary?", "num": "21", "from": 10, "to": 2, "base": 2, "answer": "10101", "solution": ["Divide by 2 again and again, keeping each remainder: 21 ÷ 2 = 10 remainder 1; 10 ÷ 2 = 5 remainder 0; 5 ÷ 2 = 2 remainder 1; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 1 0 1.", "So 21 in binary is 10101."]},
+            {"level": "medium", "q": "What is this decimal number in binary?", "num": "25", "from": 10, "to": 2, "base": 2, "answer": "11001", "solution": ["Divide by 2 again and again, keeping each remainder: 25 ÷ 2 = 12 remainder 1; 12 ÷ 2 = 6 remainder 0; 6 ÷ 2 = 3 remainder 0; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 0 0 1.", "So 25 in binary is 11001."]},
+            {"level": "medium", "q": "What is this decimal number in binary?", "num": "30", "from": 10, "to": 2, "base": 2, "answer": "11110", "solution": ["Divide by 2 again and again, keeping each remainder: 30 ÷ 2 = 15 remainder 0; 15 ÷ 2 = 7 remainder 1; 7 ÷ 2 = 3 remainder 1; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 1 1 0.", "So 30 in binary is 11110."]},
+            {"level": "medium", "q": "What is this decimal number in binary?", "num": "33", "from": 10, "to": 2, "base": 2, "answer": "100001", "solution": ["Divide by 2 again and again, keeping each remainder: 33 ÷ 2 = 16 remainder 1; 16 ÷ 2 = 8 remainder 0; 8 ÷ 2 = 4 remainder 0; 4 ÷ 2 = 2 remainder 0; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 0 0 0 1.", "So 33 in binary is 100001."]},
+            {"level": "medium", "q": "What is this decimal number in binary?", "num": "40", "from": 10, "to": 2, "base": 2, "answer": "101000", "solution": ["Divide by 2 again and again, keeping each remainder: 40 ÷ 2 = 20 remainder 0; 20 ÷ 2 = 10 remainder 0; 10 ÷ 2 = 5 remainder 0; 5 ÷ 2 = 2 remainder 1; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 1 0 0 0.", "So 40 in binary is 101000."]},
+            {"level": "medium", "q": "What is this decimal number in binary?", "num": "45", "from": 10, "to": 2, "base": 2, "answer": "101101", "solution": ["Divide by 2 again and again, keeping each remainder: 45 ÷ 2 = 22 remainder 1; 22 ÷ 2 = 11 remainder 0; 11 ÷ 2 = 5 remainder 1; 5 ÷ 2 = 2 remainder 1; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 1 1 0 1.", "So 45 in binary is 101101."]},
+            // ---------- HARD (6 questions) ----------
+            {"level": "hard", "q": "Convert this decimal number to binary.", "num": "64", "from": 10, "to": 2, "base": 2, "answer": "1000000", "solution": ["Divide by 2 again and again, keeping each remainder: 64 ÷ 2 = 32 remainder 0; 32 ÷ 2 = 16 remainder 0; 16 ÷ 2 = 8 remainder 0; 8 ÷ 2 = 4 remainder 0; 4 ÷ 2 = 2 remainder 0; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 0 0 0 0 0.", "So 64 in binary is 1000000."]},
+            {"level": "hard", "q": "Convert this decimal number to binary.", "num": "100", "from": 10, "to": 2, "base": 2, "answer": "1100100", "solution": ["Divide by 2 again and again, keeping each remainder: 100 ÷ 2 = 50 remainder 0; 50 ÷ 2 = 25 remainder 0; 25 ÷ 2 = 12 remainder 1; 12 ÷ 2 = 6 remainder 0; 6 ÷ 2 = 3 remainder 0; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 0 0 1 0 0.", "So 100 in binary is 1100100."]},
+            {"level": "hard", "q": "Convert this decimal number to binary.", "num": "128", "from": 10, "to": 2, "base": 2, "answer": "10000000", "solution": ["Divide by 2 again and again, keeping each remainder: 128 ÷ 2 = 64 remainder 0; 64 ÷ 2 = 32 remainder 0; 32 ÷ 2 = 16 remainder 0; 16 ÷ 2 = 8 remainder 0; 8 ÷ 2 = 4 remainder 0; 4 ÷ 2 = 2 remainder 0; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 0 0 0 0 0 0.", "So 128 in binary is 10000000."]},
+            {"level": "hard", "q": "Convert this decimal number to binary.", "num": "150", "from": 10, "to": 2, "base": 2, "answer": "10010110", "solution": ["Divide by 2 again and again, keeping each remainder: 150 ÷ 2 = 75 remainder 0; 75 ÷ 2 = 37 remainder 1; 37 ÷ 2 = 18 remainder 1; 18 ÷ 2 = 9 remainder 0; 9 ÷ 2 = 4 remainder 1; 4 ÷ 2 = 2 remainder 0; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 0 1 0 1 1 0.", "So 150 in binary is 10010110."]},
+            {"level": "hard", "q": "Convert this decimal number to binary.", "num": "200", "from": 10, "to": 2, "base": 2, "answer": "11001000", "solution": ["Divide by 2 again and again, keeping each remainder: 200 ÷ 2 = 100 remainder 0; 100 ÷ 2 = 50 remainder 0; 50 ÷ 2 = 25 remainder 0; 25 ÷ 2 = 12 remainder 1; 12 ÷ 2 = 6 remainder 0; 6 ÷ 2 = 3 remainder 0; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 0 0 1 0 0 0.", "So 200 in binary is 11001000."]},
+            {"level": "hard", "q": "This is the biggest value one byte can hold. Write it in binary.", "num": "255", "from": 10, "to": 2, "base": 2, "answer": "11111111", "solution": ["Divide by 2 again and again, keeping each remainder: 255 ÷ 2 = 127 remainder 1; 127 ÷ 2 = 63 remainder 1; 63 ÷ 2 = 31 remainder 1; 31 ÷ 2 = 15 remainder 1; 15 ÷ 2 = 7 remainder 1; 7 ÷ 2 = 3 remainder 1; 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1 1 1 1 1 1 1.", "So 255 in binary is 11111111."]},
+          ] },
+          lesson:{"title": "How to convert decimal to binary", "idea": "Keep dividing the number by 2 and write down each remainder. The remainders, read from the bottom up, are the binary number.", "steps": ["Divide the number by 2 and write the remainder (it is always 0 or 1).", "Divide the answer (the quotient) by 2 again and write the new remainder.", "Repeat until the quotient reaches 0.", "Read the remainders from the last one to the first one. That is your binary number."], "exTitle": "Example: convert 22 to binary", "exLines": ["22 ÷ 2 = 11 remainder 0", "11 ÷ 2 = 5 remainder 1", "5 ÷ 2 = 2 remainder 1", "2 ÷ 2 = 1 remainder 0", "1 ÷ 2 = 0 remainder 1", "Read the remainders from the bottom up: 1 0 1 1 0"], "exAnswer": "22 in decimal = 10110 in binary", "tip": "Check your work by converting back with place values.", "ref": "place"},
+          resources:[],
+          focus:["repeated division by 2", "reading remainders bottom to top"] }
+      ] },
+      { label: "Binary and octal", tone: 'b', topics: [
+        { key:"bin-oct", title:"Binary to Octal", sub:"Group the bits in threes", icon:"2→8", small:true,
+          game:{ cta:"Think you can master Binary to Octal? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+            // ---------- EASY (7 questions) ----------
+            {"level": "easy", "q": "Convert this binary number to octal.", "num": "101", "from": 2, "to": 8, "base": 8, "answer": "5", "solution": ["Split the bits into groups of 3, starting from the right: 101.", "Convert each group to one digit: 101 = 5.", "Write the digits side by side: 5."]},
+            {"level": "easy", "q": "Convert this binary number to octal.", "num": "110", "from": 2, "to": 8, "base": 8, "answer": "6", "solution": ["Split the bits into groups of 3, starting from the right: 110.", "Convert each group to one digit: 110 = 6.", "Write the digits side by side: 6."]},
+            {"level": "easy", "q": "Convert this binary number to octal.", "num": "111", "from": 2, "to": 8, "base": 8, "answer": "7", "solution": ["Split the bits into groups of 3, starting from the right: 111.", "Convert each group to one digit: 111 = 7.", "Write the digits side by side: 7."]},
+            {"level": "easy", "q": "Convert this binary number to octal.", "num": "1010", "from": 2, "to": 8, "base": 8, "answer": "12", "solution": ["Split the bits into groups of 3, starting from the right (add 2 zeros on the left to fill the first group): 001 | 010.", "Convert each group to one digit: 001 = 1, 010 = 2.", "Write the digits side by side: 12."]},
+            {"level": "easy", "q": "Convert this binary number to octal.", "num": "1101", "from": 2, "to": 8, "base": 8, "answer": "15", "solution": ["Split the bits into groups of 3, starting from the right (add 2 zeros on the left to fill the first group): 001 | 101.", "Convert each group to one digit: 001 = 1, 101 = 5.", "Write the digits side by side: 15."]},
+            {"level": "easy", "q": "Convert this binary number to octal.", "num": "1111", "from": 2, "to": 8, "base": 8, "answer": "17", "solution": ["Split the bits into groups of 3, starting from the right (add 2 zeros on the left to fill the first group): 001 | 111.", "Convert each group to one digit: 001 = 1, 111 = 7.", "Write the digits side by side: 17."]},
+            {"level": "easy", "q": "Convert this binary number to octal.", "num": "10000", "from": 2, "to": 8, "base": 8, "answer": "20", "solution": ["Split the bits into groups of 3, starting from the right (add 1 zero on the left to fill the first group): 010 | 000.", "Convert each group to one digit: 010 = 2, 000 = 0.", "Write the digits side by side: 20."]},
+            // ---------- MEDIUM (7 questions) ----------
+            {"level": "medium", "q": "What is this binary number in octal?", "num": "101110", "from": 2, "to": 8, "base": 8, "answer": "56", "solution": ["Split the bits into groups of 3, starting from the right: 101 | 110.", "Convert each group to one digit: 101 = 5, 110 = 6.", "Write the digits side by side: 56."]},
+            {"level": "medium", "q": "What is this binary number in octal?", "num": "110101", "from": 2, "to": 8, "base": 8, "answer": "65", "solution": ["Split the bits into groups of 3, starting from the right: 110 | 101.", "Convert each group to one digit: 110 = 6, 101 = 5.", "Write the digits side by side: 65."]},
+            {"level": "medium", "q": "What is this binary number in octal?", "num": "111000", "from": 2, "to": 8, "base": 8, "answer": "70", "solution": ["Split the bits into groups of 3, starting from the right: 111 | 000.", "Convert each group to one digit: 111 = 7, 000 = 0.", "Write the digits side by side: 70."]},
+            {"level": "medium", "q": "What is this binary number in octal?", "num": "100111", "from": 2, "to": 8, "base": 8, "answer": "47", "solution": ["Split the bits into groups of 3, starting from the right: 100 | 111.", "Convert each group to one digit: 100 = 4, 111 = 7.", "Write the digits side by side: 47."]},
+            {"level": "medium", "q": "What is this binary number in octal?", "num": "1001001", "from": 2, "to": 8, "base": 8, "answer": "111", "solution": ["Split the bits into groups of 3, starting from the right (add 2 zeros on the left to fill the first group): 001 | 001 | 001.", "Convert each group to one digit: 001 = 1, 001 = 1, 001 = 1.", "Write the digits side by side: 111."]},
+            {"level": "medium", "q": "What is this binary number in octal?", "num": "1011011", "from": 2, "to": 8, "base": 8, "answer": "133", "solution": ["Split the bits into groups of 3, starting from the right (add 2 zeros on the left to fill the first group): 001 | 011 | 011.", "Convert each group to one digit: 001 = 1, 011 = 3, 011 = 3.", "Write the digits side by side: 133."]},
+            {"level": "medium", "q": "What is this binary number in octal?", "num": "1110101", "from": 2, "to": 8, "base": 8, "answer": "165", "solution": ["Split the bits into groups of 3, starting from the right (add 2 zeros on the left to fill the first group): 001 | 110 | 101.", "Convert each group to one digit: 001 = 1, 110 = 6, 101 = 5.", "Write the digits side by side: 165."]},
+            // ---------- HARD (6 questions) ----------
+            {"level": "hard", "q": "Convert this binary number to octal.", "num": "11010110", "from": 2, "to": 8, "base": 8, "answer": "326", "solution": ["Split the bits into groups of 3, starting from the right (add 1 zero on the left to fill the first group): 011 | 010 | 110.", "Convert each group to one digit: 011 = 3, 010 = 2, 110 = 6.", "Write the digits side by side: 326."]},
+            {"level": "hard", "q": "Convert this binary number to octal.", "num": "10111001", "from": 2, "to": 8, "base": 8, "answer": "271", "solution": ["Split the bits into groups of 3, starting from the right (add 1 zero on the left to fill the first group): 010 | 111 | 001.", "Convert each group to one digit: 010 = 2, 111 = 7, 001 = 1.", "Write the digits side by side: 271."]},
+            {"level": "hard", "q": "Convert this binary number to octal.", "num": "11111111", "from": 2, "to": 8, "base": 8, "answer": "377", "solution": ["Split the bits into groups of 3, starting from the right (add 1 zero on the left to fill the first group): 011 | 111 | 111.", "Convert each group to one digit: 011 = 3, 111 = 7, 111 = 7.", "Write the digits side by side: 377."]},
+            {"level": "hard", "q": "Convert this binary number to octal.", "num": "101010101", "from": 2, "to": 8, "base": 8, "answer": "525", "solution": ["Split the bits into groups of 3, starting from the right: 101 | 010 | 101.", "Convert each group to one digit: 101 = 5, 010 = 2, 101 = 5.", "Write the digits side by side: 525."]},
+            {"level": "hard", "q": "Convert this binary number to octal.", "num": "110011001", "from": 2, "to": 8, "base": 8, "answer": "631", "solution": ["Split the bits into groups of 3, starting from the right: 110 | 011 | 001.", "Convert each group to one digit: 110 = 6, 011 = 3, 001 = 1.", "Write the digits side by side: 631."]},
+            {"level": "hard", "q": "Convert this binary number to octal.", "num": "1000000000", "from": 2, "to": 8, "base": 8, "answer": "1000", "solution": ["Split the bits into groups of 3, starting from the right (add 2 zeros on the left to fill the first group): 001 | 000 | 000 | 000.", "Convert each group to one digit: 001 = 1, 000 = 0, 000 = 0, 000 = 0.", "Write the digits side by side: 1000."]},
+          ] },
+          lesson:{"title": "How to convert binary to octal", "idea": "Octal is base 8, and 8 = 2 × 2 × 2, so every octal digit is exactly 3 bits. Group the bits in threes and convert each group.", "steps": ["Start from the right and split the bits into groups of 3.", "If the leftmost group is short, add zeros on its left to fill it.", "Turn each group of 3 bits into one octal digit (0 to 7) using the cheat sheet.", "Write the digits side by side."], "exTitle": "Example: convert 1101011 to octal", "exLines": ["Groups from the right: 1 | 101 | 011", "Pad the first group: 001 | 101 | 011", "001 = 1, 101 = 5, 011 = 3"], "exAnswer": "1101011 in binary = 153 in octal", "tip": "Always group from the right, never from the left.", "ref": "oct"},
+          resources:[],
+          focus:["grouping bits in 3s", "padding with leading zeros"] },
+        { key:"oct-bin", title:"Octal to Binary", sub:"Turn each digit into 3 bits", icon:"8→2", small:true,
+          game:{ cta:"Think you can master Octal to Binary? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+            // ---------- EASY (7 questions) ----------
+            {"level": "easy", "q": "Convert this octal number to binary.", "num": "2", "from": 8, "to": 2, "base": 2, "answer": "10", "solution": ["Turn each octal digit into 3 bits: 2 = 010.", "Join the groups together: 010.", "Drop the zeros at the very front: 10."]},
+            {"level": "easy", "q": "Convert this octal number to binary.", "num": "3", "from": 8, "to": 2, "base": 2, "answer": "11", "solution": ["Turn each octal digit into 3 bits: 3 = 011.", "Join the groups together: 011.", "Drop the zeros at the very front: 11."]},
+            {"level": "easy", "q": "Convert this octal number to binary.", "num": "4", "from": 8, "to": 2, "base": 2, "answer": "100", "solution": ["Turn each octal digit into 3 bits: 4 = 100.", "Join the groups together: 100.", "There are no leading zeros to drop, so the answer is 100."]},
+            {"level": "easy", "q": "Convert this octal number to binary.", "num": "5", "from": 8, "to": 2, "base": 2, "answer": "101", "solution": ["Turn each octal digit into 3 bits: 5 = 101.", "Join the groups together: 101.", "There are no leading zeros to drop, so the answer is 101."]},
+            {"level": "easy", "q": "Convert this octal number to binary.", "num": "6", "from": 8, "to": 2, "base": 2, "answer": "110", "solution": ["Turn each octal digit into 3 bits: 6 = 110.", "Join the groups together: 110.", "There are no leading zeros to drop, so the answer is 110."]},
+            {"level": "easy", "q": "Convert this octal number to binary.", "num": "7", "from": 8, "to": 2, "base": 2, "answer": "111", "solution": ["Turn each octal digit into 3 bits: 7 = 111.", "Join the groups together: 111.", "There are no leading zeros to drop, so the answer is 111."]},
+            {"level": "easy", "q": "Convert this octal number to binary.", "num": "10", "from": 8, "to": 2, "base": 2, "answer": "1000", "solution": ["Turn each octal digit into 3 bits: 1 = 001, 0 = 000.", "Join the groups together: 001000.", "Drop the zeros at the very front: 1000."]},
+            // ---------- MEDIUM (7 questions) ----------
+            {"level": "medium", "q": "What is this octal number in binary?", "num": "12", "from": 8, "to": 2, "base": 2, "answer": "1010", "solution": ["Turn each octal digit into 3 bits: 1 = 001, 2 = 010.", "Join the groups together: 001010.", "Drop the zeros at the very front: 1010."]},
+            {"level": "medium", "q": "What is this octal number in binary?", "num": "17", "from": 8, "to": 2, "base": 2, "answer": "1111", "solution": ["Turn each octal digit into 3 bits: 1 = 001, 7 = 111.", "Join the groups together: 001111.", "Drop the zeros at the very front: 1111."]},
+            {"level": "medium", "q": "What is this octal number in binary?", "num": "25", "from": 8, "to": 2, "base": 2, "answer": "10101", "solution": ["Turn each octal digit into 3 bits: 2 = 010, 5 = 101.", "Join the groups together: 010101.", "Drop the zeros at the very front: 10101."]},
+            {"level": "medium", "q": "What is this octal number in binary?", "num": "36", "from": 8, "to": 2, "base": 2, "answer": "11110", "solution": ["Turn each octal digit into 3 bits: 3 = 011, 6 = 110.", "Join the groups together: 011110.", "Drop the zeros at the very front: 11110."]},
+            {"level": "medium", "q": "What is this octal number in binary?", "num": "45", "from": 8, "to": 2, "base": 2, "answer": "100101", "solution": ["Turn each octal digit into 3 bits: 4 = 100, 5 = 101.", "Join the groups together: 100101.", "There are no leading zeros to drop, so the answer is 100101."]},
+            {"level": "medium", "q": "What is this octal number in binary?", "num": "52", "from": 8, "to": 2, "base": 2, "answer": "101010", "solution": ["Turn each octal digit into 3 bits: 5 = 101, 2 = 010.", "Join the groups together: 101010.", "There are no leading zeros to drop, so the answer is 101010."]},
+            {"level": "medium", "q": "What is this octal number in binary?", "num": "64", "from": 8, "to": 2, "base": 2, "answer": "110100", "solution": ["Turn each octal digit into 3 bits: 6 = 110, 4 = 100.", "Join the groups together: 110100.", "There are no leading zeros to drop, so the answer is 110100."]},
+            // ---------- HARD (6 questions) ----------
+            {"level": "hard", "q": "Convert this octal number to binary.", "num": "77", "from": 8, "to": 2, "base": 2, "answer": "111111", "solution": ["Turn each octal digit into 3 bits: 7 = 111, 7 = 111.", "Join the groups together: 111111.", "There are no leading zeros to drop, so the answer is 111111."]},
+            {"level": "hard", "q": "Convert this octal number to binary.", "num": "100", "from": 8, "to": 2, "base": 2, "answer": "1000000", "solution": ["Turn each octal digit into 3 bits: 1 = 001, 0 = 000, 0 = 000.", "Join the groups together: 001000000.", "Drop the zeros at the very front: 1000000."]},
+            {"level": "hard", "q": "Convert this octal number to binary.", "num": "123", "from": 8, "to": 2, "base": 2, "answer": "1010011", "solution": ["Turn each octal digit into 3 bits: 1 = 001, 2 = 010, 3 = 011.", "Join the groups together: 001010011.", "Drop the zeros at the very front: 1010011."]},
+            {"level": "hard", "q": "Convert this octal number to binary.", "num": "275", "from": 8, "to": 2, "base": 2, "answer": "10111101", "solution": ["Turn each octal digit into 3 bits: 2 = 010, 7 = 111, 5 = 101.", "Join the groups together: 010111101.", "Drop the zeros at the very front: 10111101."]},
+            {"level": "hard", "q": "Convert this octal number to binary.", "num": "345", "from": 8, "to": 2, "base": 2, "answer": "11100101", "solution": ["Turn each octal digit into 3 bits: 3 = 011, 4 = 100, 5 = 101.", "Join the groups together: 011100101.", "Drop the zeros at the very front: 11100101."]},
+            {"level": "hard", "q": "Convert this octal number to binary.", "num": "377", "from": 8, "to": 2, "base": 2, "answer": "11111111", "solution": ["Turn each octal digit into 3 bits: 3 = 011, 7 = 111, 7 = 111.", "Join the groups together: 011111111.", "Drop the zeros at the very front: 11111111."]},
+          ] },
+          lesson:{"title": "How to convert octal to binary", "idea": "This is the reverse of grouping. Turn every octal digit into its own 3-bit group, then join the groups together.", "steps": ["Look at each octal digit one at a time.", "Replace each digit with its 3-bit binary value (use the cheat sheet).", "Join all the groups together.", "Drop any zeros at the very front."], "exTitle": "Example: convert 345 to binary", "exLines": ["3 = 011, 4 = 100, 5 = 101", "Join them: 011100101", "Drop the leading zero: 11100101"], "exAnswer": "345 in octal = 11100101 in binary", "tip": "Keep all 3 bits for every digit except at the very front.", "ref": "oct"},
+          resources:[],
+          focus:["3-bit groups for octal digits", "dropping leading zeros"] }
+      ] },
+      { label: "Binary and hexadecimal", tone: 'c', topics: [
+        { key:"bin-hex", title:"Binary to Hexadecimal", sub:"Group the bits in fours", icon:"2→16", small:true,
+          game:{ cta:"Think you can master Binary to Hexadecimal? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+            // ---------- EASY (7 questions) ----------
+            {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1001", "from": 2, "to": 16, "base": 16, "answer": "9", "solution": ["Split the bits into groups of 4, starting from the right: 1001.", "Convert each group to one digit: 1001 = 9.", "Write the digits side by side: 9."]},
+            {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1010", "from": 2, "to": 16, "base": 16, "answer": "A", "solution": ["Split the bits into groups of 4, starting from the right: 1010.", "Convert each group to one digit: 1010 = A (10).", "Write the digits side by side: A."]},
+            {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1011", "from": 2, "to": 16, "base": 16, "answer": "B", "solution": ["Split the bits into groups of 4, starting from the right: 1011.", "Convert each group to one digit: 1011 = B (11).", "Write the digits side by side: B."]},
+            {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1100", "from": 2, "to": 16, "base": 16, "answer": "C", "solution": ["Split the bits into groups of 4, starting from the right: 1100.", "Convert each group to one digit: 1100 = C (12).", "Write the digits side by side: C."]},
+            {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1101", "from": 2, "to": 16, "base": 16, "answer": "D", "solution": ["Split the bits into groups of 4, starting from the right: 1101.", "Convert each group to one digit: 1101 = D (13).", "Write the digits side by side: D."]},
+            {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1110", "from": 2, "to": 16, "base": 16, "answer": "E", "solution": ["Split the bits into groups of 4, starting from the right: 1110.", "Convert each group to one digit: 1110 = E (14).", "Write the digits side by side: E."]},
+            {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1111", "from": 2, "to": 16, "base": 16, "answer": "F", "solution": ["Split the bits into groups of 4, starting from the right: 1111.", "Convert each group to one digit: 1111 = F (15).", "Write the digits side by side: F."]},
+            // ---------- MEDIUM (7 questions) ----------
+            {"level": "medium", "q": "What is this binary number in hexadecimal?", "num": "10000", "from": 2, "to": 16, "base": 16, "answer": "10", "solution": ["Split the bits into groups of 4, starting from the right (add 3 zeros on the left to fill the first group): 0001 | 0000.", "Convert each group to one digit: 0001 = 1, 0000 = 0.", "Write the digits side by side: 10."]},
+            {"level": "medium", "q": "What is this binary number in hexadecimal?", "num": "11010", "from": 2, "to": 16, "base": 16, "answer": "1A", "solution": ["Split the bits into groups of 4, starting from the right (add 3 zeros on the left to fill the first group): 0001 | 1010.", "Convert each group to one digit: 0001 = 1, 1010 = A (10).", "Write the digits side by side: 1A."]},
+            {"level": "medium", "q": "What is this binary number in hexadecimal?", "num": "101101", "from": 2, "to": 16, "base": 16, "answer": "2D", "solution": ["Split the bits into groups of 4, starting from the right (add 2 zeros on the left to fill the first group): 0010 | 1101.", "Convert each group to one digit: 0010 = 2, 1101 = D (13).", "Write the digits side by side: 2D."]},
+            {"level": "medium", "q": "What is this binary number in hexadecimal?", "num": "111111", "from": 2, "to": 16, "base": 16, "answer": "3F", "solution": ["Split the bits into groups of 4, starting from the right (add 2 zeros on the left to fill the first group): 0011 | 1111.", "Convert each group to one digit: 0011 = 3, 1111 = F (15).", "Write the digits side by side: 3F."]},
+            {"level": "medium", "q": "What is this binary number in hexadecimal?", "num": "100110", "from": 2, "to": 16, "base": 16, "answer": "26", "solution": ["Split the bits into groups of 4, starting from the right (add 2 zeros on the left to fill the first group): 0010 | 0110.", "Convert each group to one digit: 0010 = 2, 0110 = 6.", "Write the digits side by side: 26."]},
+            {"level": "medium", "q": "What is this binary number in hexadecimal?", "num": "1011100", "from": 2, "to": 16, "base": 16, "answer": "5C", "solution": ["Split the bits into groups of 4, starting from the right (add 1 zero on the left to fill the first group): 0101 | 1100.", "Convert each group to one digit: 0101 = 5, 1100 = C (12).", "Write the digits side by side: 5C."]},
+            {"level": "medium", "q": "What is this binary number in hexadecimal?", "num": "1100111", "from": 2, "to": 16, "base": 16, "answer": "67", "solution": ["Split the bits into groups of 4, starting from the right (add 1 zero on the left to fill the first group): 0110 | 0111.", "Convert each group to one digit: 0110 = 6, 0111 = 7.", "Write the digits side by side: 67."]},
+            // ---------- HARD (6 questions) ----------
+            {"level": "hard", "q": "Convert this binary number to hexadecimal.", "num": "10101010", "from": 2, "to": 16, "base": 16, "answer": "AA", "solution": ["Split the bits into groups of 4, starting from the right: 1010 | 1010.", "Convert each group to one digit: 1010 = A (10), 1010 = A (10).", "Write the digits side by side: AA."]},
+            {"level": "hard", "q": "Convert this binary number to hexadecimal.", "num": "11110000", "from": 2, "to": 16, "base": 16, "answer": "F0", "solution": ["Split the bits into groups of 4, starting from the right: 1111 | 0000.", "Convert each group to one digit: 1111 = F (15), 0000 = 0.", "Write the digits side by side: F0."]},
+            {"level": "hard", "q": "Convert this binary number to hexadecimal.", "num": "11111111", "from": 2, "to": 16, "base": 16, "answer": "FF", "solution": ["Split the bits into groups of 4, starting from the right: 1111 | 1111.", "Convert each group to one digit: 1111 = F (15), 1111 = F (15).", "Write the digits side by side: FF."]},
+            {"level": "hard", "q": "Convert this binary number to hexadecimal.", "num": "10111110", "from": 2, "to": 16, "base": 16, "answer": "BE", "solution": ["Split the bits into groups of 4, starting from the right: 1011 | 1110.", "Convert each group to one digit: 1011 = B (11), 1110 = E (14).", "Write the digits side by side: BE."]},
+            {"level": "hard", "q": "Convert this binary number to hexadecimal.", "num": "1101001011", "from": 2, "to": 16, "base": 16, "answer": "34B", "solution": ["Split the bits into groups of 4, starting from the right (add 2 zeros on the left to fill the first group): 0011 | 0100 | 1011.", "Convert each group to one digit: 0011 = 3, 0100 = 4, 1011 = B (11).", "Write the digits side by side: 34B."]},
+            {"level": "hard", "q": "Convert this binary number to hexadecimal.", "num": "111100001010", "from": 2, "to": 16, "base": 16, "answer": "F0A", "solution": ["Split the bits into groups of 4, starting from the right: 1111 | 0000 | 1010.", "Convert each group to one digit: 1111 = F (15), 0000 = 0, 1010 = A (10).", "Write the digits side by side: F0A."]},
+          ] },
+          lesson:{"title": "How to convert binary to hexadecimal", "idea": "Hexadecimal is base 16, and 16 = 2 × 2 × 2 × 2, so every hex digit is exactly 4 bits. Values 10 to 15 are written as the letters A to F.", "steps": ["Start from the right and split the bits into groups of 4.", "If the leftmost group is short, add zeros on its left to fill it.", "Turn each group into one hex digit: 0 to 9, then A = 10, B = 11, C = 12, D = 13, E = 14, F = 15.", "Write the digits side by side."], "exTitle": "Example: convert 101111010 to hexadecimal", "exLines": ["Groups from the right: 1 | 0111 | 1010", "Pad the first group: 0001 | 0111 | 1010", "0001 = 1, 0111 = 7, 1010 = A"], "exAnswer": "101111010 in binary = 17A in hexadecimal", "tip": "Learn 1010 = A, 1011 = B, 1100 = C, 1101 = D, 1110 = E, 1111 = F.", "ref": "hex"},
+          resources:[],
+          focus:["grouping bits in 4s", "hex digits A to F"] },
+        { key:"hex-bin", title:"Hexadecimal to Binary", sub:"Turn each digit into 4 bits", icon:"16→2", small:true,
+          game:{ cta:"Think you can master Hexadecimal to Binary? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+            // ---------- EASY (7 questions) ----------
+            {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "3", "from": 16, "to": 2, "base": 2, "answer": "11", "solution": ["Turn each hexadecimal digit into 4 bits: 3 = 0011.", "Join the groups together: 0011.", "Drop the zeros at the very front: 11."]},
+            {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "5", "from": 16, "to": 2, "base": 2, "answer": "101", "solution": ["Turn each hexadecimal digit into 4 bits: 5 = 0101.", "Join the groups together: 0101.", "Drop the zeros at the very front: 101."]},
+            {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "9", "from": 16, "to": 2, "base": 2, "answer": "1001", "solution": ["Turn each hexadecimal digit into 4 bits: 9 = 1001.", "Join the groups together: 1001.", "There are no leading zeros to drop, so the answer is 1001."]},
+            {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "A", "from": 16, "to": 2, "base": 2, "answer": "1010", "solution": ["Turn each hexadecimal digit into 4 bits: A (10) = 1010.", "Join the groups together: 1010.", "There are no leading zeros to drop, so the answer is 1010."]},
+            {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "B", "from": 16, "to": 2, "base": 2, "answer": "1011", "solution": ["Turn each hexadecimal digit into 4 bits: B (11) = 1011.", "Join the groups together: 1011.", "There are no leading zeros to drop, so the answer is 1011."]},
+            {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "D", "from": 16, "to": 2, "base": 2, "answer": "1101", "solution": ["Turn each hexadecimal digit into 4 bits: D (13) = 1101.", "Join the groups together: 1101.", "There are no leading zeros to drop, so the answer is 1101."]},
+            {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "F", "from": 16, "to": 2, "base": 2, "answer": "1111", "solution": ["Turn each hexadecimal digit into 4 bits: F (15) = 1111.", "Join the groups together: 1111.", "There are no leading zeros to drop, so the answer is 1111."]},
+            // ---------- MEDIUM (7 questions) ----------
+            {"level": "medium", "q": "What is this hexadecimal number in binary?", "num": "10", "from": 16, "to": 2, "base": 2, "answer": "10000", "solution": ["Turn each hexadecimal digit into 4 bits: 1 = 0001, 0 = 0000.", "Join the groups together: 00010000.", "Drop the zeros at the very front: 10000."]},
+            {"level": "medium", "q": "What is this hexadecimal number in binary?", "num": "1F", "from": 16, "to": 2, "base": 2, "answer": "11111", "solution": ["Turn each hexadecimal digit into 4 bits: 1 = 0001, F (15) = 1111.", "Join the groups together: 00011111.", "Drop the zeros at the very front: 11111."]},
+            {"level": "medium", "q": "What is this hexadecimal number in binary?", "num": "2A", "from": 16, "to": 2, "base": 2, "answer": "101010", "solution": ["Turn each hexadecimal digit into 4 bits: 2 = 0010, A (10) = 1010.", "Join the groups together: 00101010.", "Drop the zeros at the very front: 101010."]},
+            {"level": "medium", "q": "What is this hexadecimal number in binary?", "num": "3C", "from": 16, "to": 2, "base": 2, "answer": "111100", "solution": ["Turn each hexadecimal digit into 4 bits: 3 = 0011, C (12) = 1100.", "Join the groups together: 00111100.", "Drop the zeros at the very front: 111100."]},
+            {"level": "medium", "q": "What is this hexadecimal number in binary?", "num": "4B", "from": 16, "to": 2, "base": 2, "answer": "1001011", "solution": ["Turn each hexadecimal digit into 4 bits: 4 = 0100, B (11) = 1011.", "Join the groups together: 01001011.", "Drop the zeros at the very front: 1001011."]},
+            {"level": "medium", "q": "What is this hexadecimal number in binary?", "num": "7E", "from": 16, "to": 2, "base": 2, "answer": "1111110", "solution": ["Turn each hexadecimal digit into 4 bits: 7 = 0111, E (14) = 1110.", "Join the groups together: 01111110.", "Drop the zeros at the very front: 1111110."]},
+            {"level": "medium", "q": "What is this hexadecimal number in binary?", "num": "A5", "from": 16, "to": 2, "base": 2, "answer": "10100101", "solution": ["Turn each hexadecimal digit into 4 bits: A (10) = 1010, 5 = 0101.", "Join the groups together: 10100101.", "There are no leading zeros to drop, so the answer is 10100101."]},
+            // ---------- HARD (6 questions) ----------
+            {"level": "hard", "q": "Convert this hexadecimal number to binary.", "num": "C3", "from": 16, "to": 2, "base": 2, "answer": "11000011", "solution": ["Turn each hexadecimal digit into 4 bits: C (12) = 1100, 3 = 0011.", "Join the groups together: 11000011.", "There are no leading zeros to drop, so the answer is 11000011."]},
+            {"level": "hard", "q": "Convert this hexadecimal number to binary.", "num": "FF", "from": 16, "to": 2, "base": 2, "answer": "11111111", "solution": ["Turn each hexadecimal digit into 4 bits: F (15) = 1111, F (15) = 1111.", "Join the groups together: 11111111.", "There are no leading zeros to drop, so the answer is 11111111."]},
+            {"level": "hard", "q": "Convert this hexadecimal number to binary.", "num": "1A3", "from": 16, "to": 2, "base": 2, "answer": "110100011", "solution": ["Turn each hexadecimal digit into 4 bits: 1 = 0001, A (10) = 1010, 3 = 0011.", "Join the groups together: 000110100011.", "Drop the zeros at the very front: 110100011."]},
+            {"level": "hard", "q": "Convert this hexadecimal number to binary.", "num": "2BC", "from": 16, "to": 2, "base": 2, "answer": "1010111100", "solution": ["Turn each hexadecimal digit into 4 bits: 2 = 0010, B (11) = 1011, C (12) = 1100.", "Join the groups together: 001010111100.", "Drop the zeros at the very front: 1010111100."]},
+            {"level": "hard", "q": "Convert this hexadecimal number to binary.", "num": "ABC", "from": 16, "to": 2, "base": 2, "answer": "101010111100", "solution": ["Turn each hexadecimal digit into 4 bits: A (10) = 1010, B (11) = 1011, C (12) = 1100.", "Join the groups together: 101010111100.", "There are no leading zeros to drop, so the answer is 101010111100."]},
+            {"level": "hard", "q": "Convert this hexadecimal number to binary.", "num": "F0F", "from": 16, "to": 2, "base": 2, "answer": "111100001111", "solution": ["Turn each hexadecimal digit into 4 bits: F (15) = 1111, 0 = 0000, F (15) = 1111.", "Join the groups together: 111100001111.", "There are no leading zeros to drop, so the answer is 111100001111."]},
+          ] },
+          lesson:{"title": "How to convert hexadecimal to binary", "idea": "Replace every hex digit with its 4-bit binary value, then join the groups together. It is the reverse of grouping.", "steps": ["Look at each hex digit one at a time.", "Replace it with 4 bits (use the cheat sheet, for example A = 1010 and F = 1111).", "Join all the groups together.", "Drop any zeros at the very front."], "exTitle": "Example: convert 2F to binary", "exLines": ["2 = 0010, F = 1111", "Join them: 00101111", "Drop the leading zeros: 101111"], "exAnswer": "2F in hexadecimal = 101111 in binary", "tip": "Keep all 4 bits for every digit except at the very front.", "ref": "hex"},
+          resources:[],
+          focus:["4-bit groups for hex digits", "dropping leading zeros"] }
+      ] }
+    ]
+  }
+};
+
+/* ================= ARITHMETIC SECTIONS: Addition, Subtraction, Multiplication, Division =================
+   Every section holds the same 6 conversion types (binary to decimal, decimal to binary, binary to octal,
+   octal to binary, binary to hexadecimal, hexadecimal to binary). In each topic the student does the
+   operation on two numbers written in the "from" base and gives the result in the "to" base.
+   Questions are built from a fixed seed, so they are the same on every visit, and every answer is computed
+   by the program (never typed by hand). Each topic has 60 questions: 20 easy, 20 medium and 20 hard. The student picks a difficulty and plays its 20. */
+const BASE_WORD = { 2:'binary', 8:'octal', 10:'decimal', 16:'hexadecimal' };
+const CONV_GROUPS = [
+  { label:'Binary and decimal', tone:'a', items:[
+    { k:'bin-dec', from:2,  to:10, title:'Binary to Decimal',     ref:'place' },
+    { k:'dec-bin', from:10, to:2,  title:'Decimal to Binary',     ref:'place' } ] },
+  { label:'Binary and octal', tone:'b', items:[
+    { k:'bin-oct', from:2,  to:8,  title:'Binary to Octal',       ref:'oct' },
+    { k:'oct-bin', from:8,  to:2,  title:'Octal to Binary',       ref:'oct' } ] },
+  { label:'Binary and hexadecimal', tone:'c', items:[
+    { k:'bin-hex', from:2,  to:16, title:'Binary to Hexadecimal', ref:'hex' },
+    { k:'hex-bin', from:16, to:2,  title:'Hexadecimal to Binary', ref:'hex' } ] }
+];
+const ARITH = {
+  add:{ name:'Addition',       sym:'+', show:'+',      tone:'a', result:'sum',        verb:'Add',
+        desc:'Add two numbers, then write the sum in another number system.',
+        step:'Add the two decimal numbers.',
+        idea:'Adding works the same in every number system. The easy route is to change both numbers to decimal, add them, and then write the total in the base the question asks for.',
+        tip:'Binary carry rule: 1 + 1 = 10 (write 0 and carry 1).', ex:[13, 6] },
+  sub:{ name:'Subtraction',    sym:'\u2212', show:'\u2212', tone:'b', result:'difference', verb:'Subtract',
+        desc:'Subtract one number from another, then change the answer\u2019s base.',
+        step:'Subtract the second decimal number from the first.',
+        idea:'Subtract the second number from the first. The easy route is to change both numbers to decimal, subtract, and then write the difference in the base the question asks for.',
+        tip:'Binary borrow rule: 10 \u2212 1 = 1 (borrow from the next place).', ex:[25, 9] },
+  mul:{ name:'Multiplication', sym:'\u00D7', show:'\u00D7', tone:'c', result:'product',    verb:'Multiply',
+        desc:'Multiply two numbers, then write the product in another base.',
+        step:'Multiply the two decimal numbers.',
+        idea:'Multiplying works the same in every number system. Change both numbers to decimal, multiply them, and then write the product in the base the question asks for.',
+        tip:'In binary, multiplying by 2 just shifts every bit one place to the left.', ex:[6, 5] },
+  div:{ name:'Division',       sym:'\u00F7', show:'\u00F7', tone:'d', result:'quotient',   verb:'Divide',
+        desc:'Divide one number by another (exact answers), then change the base.',
+        step:'Divide the first decimal number by the second.',
+        idea:'Divide the first number by the second. Every question divides exactly, with no remainder. Change both numbers to decimal, divide, and then write the quotient in the base the question asks for.',
+        tip:'In binary, dividing by 2 just shifts every bit one place to the right.', ex:[28, 4] }
+};
+const ARITH_ORDER = ['add','sub','mul','div'];
+const FROM_METHOD = {
+  2:'use place values (1, 2, 4, 8, 16 and so on) for every bit that is 1, then add them',
+  8:'multiply each digit by its power of 8 (1, 8, 64 and so on), then add',
+  10:'both numbers are already decimal, so keep them as they are',
+  16:'multiply each digit by its power of 16 (1, 16, 256 and so on), then add (A = 10 up to F = 15)'
+};
+const TO_METHOD = {
+  10:'the result is already decimal, so you are done',
+  2:'divide by 2 again and again, then read the remainders from the last to the first',
+  8:'write it in binary, group the bits in 3s from the right, and turn each group into one octal digit',
+  16:'write it in binary, group the bits in 4s from the right, and turn each group into one hex digit (A = 10 up to F = 15)'
+};
+
+// small seeded random number generator (same questions on every visit)
+function seededRng(str){
+  let h = 1779033703 ^ str.length;
+  for(let i = 0; i < str.length; i++){ h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  let a = h >>> 0;
+  return function(){
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function arFmt(n, base){ return n.toString(base).toUpperCase(); }
+
+// One operand pair for an operation and difficulty: returns [first, second, result] in decimal.
+function arithPair(op, diff, r){
+  const R = (lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
+  let a, b;
+  if(op === 'add'){
+    const [lo, hi] = diff === 'easy' ? [1, 9] : diff === 'medium' ? [8, 31] : [32, 127];
+    a = R(lo, hi); b = R(lo, hi); return [a, b, a + b];
+  }
+  if(op === 'sub'){
+    if(diff === 'easy'){ a = R(4, 15); b = R(1, a - 1); }
+    else if(diff === 'medium'){ a = R(16, 63); b = R(4, a - 1); }
+    else { a = R(64, 255); b = R(16, a - 8); }
+    return [a, b, a - b];
+  }
+  if(op === 'mul'){
+    if(diff === 'easy'){ a = R(2, 8); b = R(2, 8); }
+    else if(diff === 'medium'){ a = R(5, 15); b = R(2, 7); }
+    else { a = R(10, 31); b = R(5, 15); }
+    return [a, b, a * b];
+  }
+  let d, k;                                   // division: pick divisor and quotient, so it always divides exactly
+  if(diff === 'easy'){ d = R(2, 6); k = R(2, 8); }
+  else if(diff === 'medium'){ d = R(2, 9); k = R(4, 15); }
+  else { d = R(3, 15); k = R(6, 31); }
+  return [d * k, d, k];
+}
+
+function arithSolution(op, a, b, res, from, to){
+  const O = ARITH[op];
+  const A = arFmt(a, from), B = arFmt(b, from), R = arFmt(res, to);
+  const s1 = from === 10
+    ? `The numbers are already in decimal: ${a} and ${b}.`
+    : `Convert both ${BASE_WORD[from]} numbers to decimal: ${A} = ${a} and ${B} = ${b}.`;
+  const s2 = `${O.verb} in decimal: ${a} ${O.show} ${b} = ${res}.`;
+  let s3;
+  if(to === 10){
+    s3 = `The answer is already in decimal, so the final answer is ${res}.`;
+  } else if(to === 2){
+    s3 = `Convert ${res} to binary (divide by 2 and read the remainders from the last to the first): ${res} = ${R}.`;
+  } else {
+    const size = to === 8 ? 3 : 4, bin = res.toString(2);
+    const padded = bin.padStart(Math.ceil(bin.length / size) * size, '0');
+    const groups = padded.match(new RegExp('.{' + size + '}', 'g'));
+    const digits = groups.map(g => arFmt(parseInt(g, 2), to));
+    s3 = `Write ${res} in binary: ${bin}. Group the bits in ${size}s from the right: ${groups.join(' | ')}. Each group is one ${BASE_WORD[to]} digit: ${digits.join(' ')}, so the answer is ${R}.`;
+  }
+  return [s1, s2, s3];
+}
+
+function buildArithTopic(op, t){
+  const O = ARITH[op];
+  const rnd = seededRng(op + '|' + t.k);
+  const plan = [['easy', 20], ['medium', 20], ['hard', 20]];
+  const questions = [], seen = new Set();   // one list for the whole topic, so no pair is used twice
+  plan.forEach(([diff, count]) => {
+    const rows = [];
+    let guard = 0;
+    while(rows.length < count && guard++ < 3000){
+      const [a, b, res] = arithPair(op, diff, rnd);
+      const key = a + ',' + b;
+      if(seen.has(key) || res < 1 || (op !== 'div' && a === b)) continue;
+      seen.add(key); rows.push([a, b, res]);
+    }
+    rows.sort((x, y) => x[2] - y[2]);        // easiest first inside each level
+    rows.forEach(([a, b, res]) => {
+      const f = BASE_WORD[t.from], g = BASE_WORD[t.to];
+      const q = diff === 'easy'
+        ? `${O.verb} ${op === 'sub' ? 'these ' + f + ' numbers (first minus second)' : op === 'div' ? 'the first ' + f + ' number by the second' : 'these ' + f + ' numbers'}. Write the ${O.result} in ${g}.`
+        : diff === 'medium'
+        ? `What is the ${O.result} of these ${f} numbers? Give it in ${g}.`
+        : `Work out the ${O.result} of these ${f} numbers and write it in ${g}.`;
+      questions.push({
+        level: diff, q, num: `${arFmt(a, t.from)} ${O.show} ${arFmt(b, t.from)}`, expr: true,
+        from: t.from, to: t.to, base: t.to, answer: arFmt(res, t.to),
+        solution: arithSolution(op, a, b, res, t.from, t.to)
+      });
+    });
+  });
+
+  const [ea, eb] = O.ex, eres = op === 'add' ? ea + eb : op === 'sub' ? ea - eb : op === 'mul' ? ea * eb : ea / eb;
+  const exSol = arithSolution(op, ea, eb, eres, t.from, t.to);
+  const exExpr = `${arFmt(ea, t.from)} ${O.show} ${arFmt(eb, t.from)}`;
+  const lesson = {
+    title: `How to ${O.verb.toLowerCase()} ${BASE_WORD[t.from]} numbers and answer in ${BASE_WORD[t.to]}`,
+    idea: O.idea,
+    steps: [
+      from10steps(t.from),
+      O.step,
+      `Convert the result to ${BASE_WORD[t.to]}: ${TO_METHOD[t.to]}.`,
+      'Check your work: change your answer back to decimal and make sure it matches the result.'
+    ],
+    exTitle: `Example: ${exExpr} (${BASE_WORD[t.from]})`,
+    exLines: exSol,
+    exAnswer: `${exExpr} = ${arFmt(eres, t.to)} in ${BASE_WORD[t.to]}`,
+    tip: O.tip,
+    ref: t.ref
+  };
+  return {
+    key: op + '-' + t.k,
+    title: t.title,
+    sub: `${O.verb} ${BASE_WORD[t.from]} numbers, answer in ${BASE_WORD[t.to]}`,
+    icon: `${t.from}\u2192${t.to}`, small: true,
+    game: { levels: true, cta: `Think you can master ${O.name} with ${t.title}? Pick Easy, Medium or Hard, answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!`, questions },
+    lesson, resources: [],
+    focus: [`${O.name.toLowerCase()} in ${BASE_WORD[t.from]}`, `answers in ${BASE_WORD[t.to]}`]
+  };
+}
+function from10steps(from){
+  return from === 10 ? 'Both numbers are already decimal, so keep them as they are.'
+                     : `Convert each ${BASE_WORD[from]} number to decimal: ${FROM_METHOD[from]}.`;
+}
+
+ARITH_ORDER.forEach(op => {
+  const O = ARITH[op];
+  LEVELS[op] = {
+    name: O.name, short: O.name, sym: O.sym, tone: O.tone, desc: O.desc,
+    intro: `Pick a conversion to open its quick lesson and ${O.name.toLowerCase()} challenge: Easy, Medium and Hard, 20 questions each.`,
+    groups: CONV_GROUPS.map(g => ({ label: g.label, tone: g.tone, topics: g.items.map(t => buildArithTopic(op, t)) }))
+  };
+});
+
+// The four section cards on the "Choose a section" screen.
+function renderSections(){
+  const el = document.getElementById('sectionGrid');
+  if(!el) return;
+  el.innerHTML = ARITH_ORDER.map(op => {
+    const L = LEVELS[op];
+    const topics = L.groups.flatMap(g => g.topics);
+    const qs = topics.reduce((n, t) => n + t.game.questions.length, 0);
+    return `
+      <button class="sec-card sec-${L.tone}" onclick="chooseLevel('${op}')">
+        <span class="sec-symbol" aria-hidden="true">${L.sym}</span>
+        <span class="sec-body">
+          <span class="sec-name">${L.name}</span>
+          <span class="sec-desc">${L.desc}</span>
+          <span class="sec-meta">${topics.length} topics \u00B7 ${qs} questions</span>
+        </span>
+        <span class="topic-arrow">\u2192</span>
+      </button>`;
+  }).join('');
+}
+renderSections();
+
+function openSections(){
+  showWizardStep('sections');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+// Level card clicked: show the topic picker and remember the level for this student.
+function chooseLevel(levelKey){
+  const level = LEVELS[levelKey];
+  if(!level) return;
+  if(currentUser){
+    db.collection('users').doc(currentUser.uid).set({level: level.name}, {merge:true}).catch(console.error);
+  }
+  renderTopics(levelKey);
+  showWizardStep('topics');
+}
+
+// Builds the organized grid of topic buttons, one labelled group at a time.
+function renderTopics(levelKey){
+  const level = LEVELS[levelKey];
+  document.getElementById('topicsHeading').textContent = level.name;
+  const intro = document.getElementById('topicsIntro'); if(intro && level.intro) intro.textContent = level.intro;
+  document.getElementById('topicGroups').innerHTML = level.groups.map(group => `
+    <div class="topic-group-label tone-${group.tone}"><span class="tg-dot"></span>${escapeHtml(group.label)}</div>
+    <div class="topic-grid topic-grid-wide">
+      ${group.topics.map(t => {
+        const n = t.game && t.game.questions ? t.game.questions.length : 0;
+        return `
+        <button class="topic-card tone-${group.tone}" onclick="openTopic('${levelKey}', '${t.key}')">
+          <span class="topic-icon${t.small ? ' topic-icon-sm' : ''}">${escapeHtml(t.icon)}</span>
+          <span class="topic-text">
+            <span class="topic-title">${escapeHtml(t.title)}</span>
+            <span class="topic-sub">${escapeHtml(t.sub)}</span>
+            <span class="topic-meta">
+              <span class="topic-count">${n} questions</span>
+              ${['easy','medium','hard'].map(lv => { const c = t.game.questions.filter(q => q.level === lv).length; return c ? `<span class="topic-mix mix-${lv}"><i></i>${c} ${lv}</span>` : ''; }).join('')}
+            </span>
+          </span>
+          <span class="topic-arrow">\u2192</span>
+        </button>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+// Topic card clicked: open that topic's lesson page.
+function openTopic(levelKey, topicKey){
+  const level = LEVELS[levelKey];
+  const topic = level && level.groups.flatMap(g => g.topics).find(t => t.key === topicKey);
+  if(topic) showTopicResources(levelKey, topic);
+}
+
+// Shows the lesson materials (video, slides, assessment) for a topic.
+let currentTopicRef = null;
+
+function allTopicsOf(levelKey){ return LEVELS[levelKey].groups.flatMap(g => g.topics); }
+
+function goBackToTopics(){
+  showWizardStep('topics');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function backToTopicTop(){
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function goNextTopic(){
+  if(!currentTopicRef) return;
+  const list = allTopicsOf(currentTopicRef.levelKey);
+  const idx = list.findIndex(t => t.key === currentTopicRef.topicKey);
+  if(idx >= 0 && idx < list.length - 1){
+    showTopicResources(currentTopicRef.levelKey, list[idx + 1]);
+    window.scrollTo({top:0, behavior:'smooth'});
+  } else {
+    goBackToTopics();   // that was the last topic
+  }
+}
+
+function showTopicResources(levelKey, topic){
+  currentTopicRef = { levelKey, topicKey: topic.key };
+  const _list = allTopicsOf(levelKey);
+  const _isLast = _list.findIndex(t => t.key === topic.key) >= _list.length - 1;
+  document.getElementById('resNextBtn').textContent = _isLast ? 'All topics ✓' : 'Next Topic →';
+  const level = LEVELS[levelKey];
+  const badge = document.getElementById('resBadge');
+  badge.textContent = topic.icon;
+  badge.classList.toggle('res-badge-sm', topic.icon.length >= 3);
+  document.getElementById('resEyebrow').textContent = level.name;
+  document.getElementById('resTitle').textContent = topic.title;
+
+  const ICONS = {
+    ppt:'<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 20h8M12 16v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    quiz:'<svg viewBox="0 0 24 24" fill="none"><rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 9l1.5 1.5L14 7M9 15h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+  const resources = topic.resources || [];
+  const video = resources.find(r=>r.type==='video');
+  const others = resources.filter(r=>r.type!=='video');
+
+  // YouTube video cards live in binary-portal.html (#resStaticVideos): stop & hide them all, then show this topic's set.
+  stopAllLessonVideos();
+  if(video && video.staticId){
+    const el = document.getElementById(video.staticId);
+    if(el){
+      el.hidden = false;
+      el.querySelectorAll('iframe[data-src]').forEach(f => { f.src = f.dataset.src; });
+    }
+  }
+
+  const videoHtml = (video && !video.staticId) ? `
+    <div class="res-video-card${video.portrait ? ' portrait' : ''}">
+      <div class="res-video-frame">
+        ${video.file
+          ? `<video controls playsinline preload="metadata" src="${escapeHtml(video.file)}"
+               onloadedmetadata="this.closest('.res-video-card').classList.toggle('portrait', this.videoHeight > this.videoWidth)"
+               onerror="this.nextElementSibling.style.display='flex'">
+               Your browser can't play this video.
+             </video>
+             <div class="res-video-error">
+               <span>⚠️</span>
+               <b>Video not found</b>
+               <p>Put the file here:<br><code>${escapeHtml(video.file)}</code><br>(next to binary-portal.html)</p>
+             </div>`
+          : `<iframe src="https://www.youtube-nocookie.com/embed/${escapeHtml(video.videoId)}" title="${escapeHtml(video.title)}"
+               loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`}
+      </div>
+      <div class="res-video-info">
+        <span class="res-tag tag-video">Step 1</span>
+        <h4>${escapeHtml(video.title)}</h4>
+        <p class="res-summary-label">📝 What it's about</p>
+        <p>${escapeHtml(video.desc)}</p>
+        ${video.file
+          ? (video.duration ? `<span class="res-duration">⏱ ${escapeHtml(video.duration)} lesson</span>` : '')
+          : `<a class="res-link-btn" href="${escapeHtml(video.url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>`}
+      </div>
+    </div>` : '';
+
+  const cardsHtml = others.map((r,i)=>`
+    <a class="res-card res-${r.type}" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">
+      <span class="res-card-icon">${ICONS[r.type] || ''}</span>
+      <span class="res-tag tag-${r.type}">Step ${i + (video ? 2 : 1)}</span>
+      <span class="res-card-title">${escapeHtml(r.title)}</span>
+      <span class="res-card-desc">${escapeHtml(r.desc)}</span>
+      <span class="res-card-cta">${escapeHtml(r.cta || 'Open')} <span>→</span></span>
+    </a>`).join('');
+
+  document.getElementById('resBody').innerHTML = resources.length
+    ? videoHtml + (cardsHtml ? `<div class="res-grid">${cardsHtml}</div>` : '')
+    : topic.lesson ? renderLesson(topic)
+    : `<div class="res-empty"><span>🚧</span><h4>Lesson materials coming soon</h4><p>The video, slides and assessment for ${escapeHtml(topic.title)} will be added here.</p></div>`;
+  document.getElementById('resBody').insertAdjacentHTML('beforeend', '<div id="gameMount"></div><div id="sketchMount"></div>');
+  gameInit(topic);
+  sketchInit(topic);
+  markActiveToday();
+  showWizardStep('resources');
+}
+
+/* ================= QUICK LESSON CARD (shown above the mini game) ================= */
+function lessonRefHtml(kind){
+  if(kind === 'place'){
+    let cells = '';
+    for(let e = 7; e >= 0; e--){
+      cells += `<div class="ref-chip"><b>${1 << e}</b><span>2<sup>${e}</sup></span></div>`;
+    }
+    return `<div class="lesson-ref"><h5>Cheat sheet: place values of one byte</h5><div class="ref-grid">${cells}</div></div>`;
+  }
+  const bits = kind === 'oct' ? 3 : 4;
+  const count = kind === 'oct' ? 8 : 16;
+  let cells = '';
+  for(let i = 0; i < count; i++){
+    cells += `<div class="ref-chip"><b>${i.toString(16).toUpperCase()}</b><span>${i.toString(2).padStart(bits, '0')}</span></div>`;
+  }
+  const title = kind === 'oct' ? 'Cheat sheet: octal digit = 3 bits' : 'Cheat sheet: hex digit = 4 bits';
+  return `<div class="lesson-ref"><h5>${title}</h5><div class="ref-grid">${cells}</div></div>`;
+}
+
+/* ================= CHEAT SHEET (tap a card for details, rules for the operation, quick facts, live converter) =================
+   Everything on the cheat sheet is calculated by the program, so the examples are always correct. */
+const CS_ORD = ['1st','2nd','3rd','4th','5th','6th','7th','8th'];
+const CS_PLACE_NAMES = ['ones','twos','fours','eights','sixteens','thirty-twos','sixty-fours','one-hundred-twenty-eights'];
+const CS_SUP = '\u2070\u00B9\u00B2\u00B3\u2074\u2075\u2076\u2077\u2078\u2079';
+function csPow(base, e){ return String(base) + String(e).split('').map(d => CS_SUP[+d]).join(''); }
+function csBits(n, pad){ return n.toString(2).padStart(pad || 1, '0'); }
+function csTerms(n, count){ const t = []; for(let i = count - 1; i >= 0; i--) if((n >> i) & 1) t.push(1 << i); return t; }
+function csGroup(str, size){ const g = []; for(let i = str.length; i > 0; i -= size) g.unshift(str.slice(Math.max(0, i - size), i)); return g.join(' '); }
+function csSec(title, body, cls){ return `<div class="cs-sec ${cls || ''}"><h6>${title}</h6>${body}</div>`; }
+function csLine(t){ return `<div class="cs-line">${t}</div>`; }
+function csDetail(i, big, sub, secs){
+  return `<div class="cs-detail" data-for="${i}" hidden>
+    <div class="cs-dhead"><span class="cs-dbig">${big}</span><span class="cs-dsub">${sub}</span></div>
+    <div class="cs-dgrid">${secs}</div>
+  </div>`;
+}
+
+/* ----- Explore tab: one detail card for every tile ----- */
+function csPlaceDetailSmall(e){
+  const val = 1 << e;
+  const n = val | (0b10110101 & (val - 1));               // an example number that uses this place
+  const bin = csBits(n, e + 1), terms = csTerms(n, e + 1);
+  const sumLine = terms.length === 1 ? `${bin} = ${terms[0]}` : `${bin} = ${terms.join(' + ')} = ${n}`;
+  let left = n, rows = '';
+  for(let i = e; i >= 0; i--){
+    const pv = 1 << i;
+    if(left >= pv){ rows += `<tr><td>${pv}</td><td>${left} \u2265 ${pv}</td><td><b class="on">1</b></td><td>${left} \u2212 ${pv} = ${left - pv}</td></tr>`; left -= pv; }
+    else          { rows += `<tr><td>${pv}</td><td>${left} &lt; ${pv}</td><td><b>0</b></td><td>nothing to subtract</td></tr>`; }
+  }
+  const secs =
+    csSec('What it means', csLine(`A <b>1</b> in this place adds <b>${val}</b> to the number. A <b>0</b> adds nothing.`) +
+      csLine(`It is the <b>${CS_ORD[e]}</b> place from the right (the ${CS_PLACE_NAMES[e]} place).`) +
+      csLine(e ? `Every place is double the one before it: ${val / 2} \u00D7 2 = ${val}.` : `Every place is double the one before it, starting from 1.`) +
+      csLine(`As a binary number it is <b>1${'0'.repeat(e)}</b>${e ? ` (a 1 followed by ${e} zero${e > 1 ? 's' : ''})` : ''}.`)) +
+    csSec('Binary \u2192 Decimal example', csLine(`<b>${sumLine}</b>`) + csLine(`Add the place value of every 1. Skip the 0s.`)) +
+    csSec(`Decimal \u2192 Binary example: ${n}`,
+      `<div class="cs-tablewrap"><table class="cs-table"><thead><tr><th>Place</th><th>Does it fit?</th><th>Bit</th><th>Left over</th></tr></thead><tbody>${rows}</tbody></table></div>` +
+      csLine(`Reading the bits from top to bottom gives <b>${bin}</b>.`), 'wide') +
+    csSec('Good to know', csLine(`${e + 1} bit${e ? 's' : ''} can hold the numbers 0 to <b>${(1 << (e + 1)) - 1}</b>.`) +
+      csLine(e === 7 ? 'One byte is 8 bits, so it holds 0 to 255.' : e === 3 ? 'Four bits (a nibble) make exactly one hexadecimal digit.' : e === 2 ? 'Three bits make exactly one octal digit (0 to 7).' : `This place is worth exactly 1 more than all the smaller places added together (${val - 1} + 1 = ${val}).`));
+  return csDetail(e, `${CS_PLACE_NAMES[e].charAt(0).toUpperCase()}${CS_PLACE_NAMES[e].slice(1)}`, `${csPow(2, e)} = ${val}`, secs);
+}
+
+const CS_OCT_NOTES = [
+  'Zero: all three bits are off (000). Inside a number never drop these zeros: 705\u2088 = 111 000 101.',
+  'The smallest non-zero digit: only the ones bit is on. In file permissions, 1 means execute.',
+  'Only the twos bit is on. In file permissions, 2 means write.',
+  'The twos and ones bits are on: 2 + 1 = 3. In file permissions, 3 means write + execute.',
+  'Only the fours bit is on. In file permissions, 4 means read.',
+  'The fours and ones bits are on: 4 + 1 = 5. In file permissions, 5 means read + execute.',
+  'The fours and twos bits are on: 4 + 2 = 6. In file permissions, 6 means read + write.',
+  'The largest octal digit: every bit is on (111). In file permissions, 7 means read + write + execute.'
+];
+function csOctDetail(d){
+  const bits = csBits(d, 3), terms = csTerms(d, 3), other = (d + 3) % 8;
+  const os = d.toString(8) + other.toString(8), dec = d * 8 + other;
+  const secs =
+    csSec('What it means', csLine(`Octal digit <b>${d}</b> is binary <b>${bits}</b> and decimal <b>${d}</b>.`) +
+      csLine(`The three bits are worth 4, 2 and 1: <b>${bits} = ${terms.length ? terms.join(' + ') : '0'}${terms.length > 1 ? ' = ' + d : ''}</b>.`) +
+      csLine(CS_OCT_NOTES[d])) +
+    csSec('Binary \u2192 Octal example', csLine(`Binary <b>${csBits(d, 3)} ${csBits(other, 3)}</b> is two groups of 3.`) +
+      csLine(`${csBits(d, 3)} = ${d} and ${csBits(other, 3)} = ${other}`) + csLine(`So the octal number is <b>${os}</b>.`)) +
+    csSec('Octal \u2192 Binary example', csLine(`Octal <b>${os}</b>: turn each digit into 3 bits.`) +
+      csLine(`${d} \u2192 ${csBits(d, 3)} and ${other} \u2192 ${csBits(other, 3)}`) + csLine(`Join them: <b>${csBits(d, 3)}${csBits(other, 3)}</b>.`)) +
+    csSec('Octal \u2192 Decimal check', csLine(`${os}\u2088 = ${d} \u00D7 8 + ${other} = <b>${dec}</b>`) + csLine(`Every octal place is worth 8 times the place to its right.`));
+  return csDetail(d, `${d}`, `octal digit \u00B7 bits ${bits}`, secs);
+}
+
+const CS_HEX_NOTES = {
+  10:'A is ten. It is the first letter-digit, the first number after 9.',
+  11:'B is eleven.',
+  12:'C is twelve. A dozen eggs is C eggs.',
+  13:'D is thirteen.',
+  14:'E is fourteen.',
+  15:'F is fifteen, the biggest hex digit (all four bits on). FF = 255 is the biggest byte, and #FF0000 is pure red on a web page.'
+};
+function csHexDetail(h){
+  const L = h.toString(16).toUpperCase(), bits = csBits(h, 4), terms = csTerms(h, 4);
+  const other = (h + 5) % 16, O = other.toString(16).toUpperCase(), hs = L + O, dec = h * 16 + other;
+  const secs =
+    csSec('What it means', csLine(`Hex digit <b>${L}</b> is binary <b>${bits}</b> and decimal <b>${h}</b>.`) +
+      csLine(`The four bits are worth 8, 4, 2 and 1: <b>${bits} = ${terms.length ? terms.join(' + ') : '0'}${terms.length > 1 ? ' = ' + h : ''}</b>.`) +
+      csLine(h > 9 ? CS_HEX_NOTES[h] : (h === 0 ? 'Zero: all four bits are off (0000). Keep these zeros inside a number: 205\u2081\u2086 = 0010 0000 0101.' : `Digits 0 to 9 keep the same value in hex and decimal.`))) +
+    csSec('Binary \u2192 Hex example', csLine(`Binary <b>${csBits(h, 4)} ${csBits(other, 4)}</b> is two groups of 4.`) +
+      csLine(`${csBits(h, 4)} = ${L} and ${csBits(other, 4)} = ${O}`) + csLine(`So the hex number is <b>${hs}</b>.`)) +
+    csSec('Hex \u2192 Binary example', csLine(`Hex <b>${hs}</b>: turn each digit into 4 bits.`) +
+      csLine(`${L} \u2192 ${csBits(h, 4)} and ${O} \u2192 ${csBits(other, 4)}`) + csLine(`Join them: <b>${csBits(h, 4)}${csBits(other, 4)}</b>.`)) +
+    csSec('Hex \u2192 Decimal check', csLine(`${hs}\u2081\u2086 = ${L} \u00D7 16 + ${O} = ${h} \u00D7 16 + ${other} = <b>${dec}</b>`) + csLine(`Every hex place is worth 16 times the place to its right.`));
+  return csDetail(h, L, `hex digit \u00B7 bits ${bits}`, secs);
+}
+
+/* ----- Operation tab: rules + a worked example in binary (calculated live) ----- */
+function csPre(rows){ return `<pre class="cs-pre" tabindex="0">${rows.join('\n')}</pre>`; }
+function csCells(str, w){ return str.padStart(w, ' ').split('').join(' '); }
+function csOpWorked(op, a, b){
+  const A = a.toString(2), B = b.toString(2), lab = 9;
+  if(op === 'add'){
+    const R = (a + b).toString(2), w = R.length, pa = A.padStart(w, '0'), pb = B.padStart(w, '0');
+    const carry = Array(w).fill(' '); let c = 0;
+    for(let i = w - 1; i >= 0; i--){ const s = (+pa[i]) + (+pb[i]) + c; c = s >= 2 ? 1 : 0; if(c && i > 0) carry[i - 1] = '1'; }
+    const hl = s => s.replace(/1/g, '<i>1</i>');
+    return { pre: csPre([
+        'carry'.padEnd(lab) + hl(carry.join(' ')),
+        ''.padEnd(lab) + csCells(A, w),
+        '+'.padEnd(lab - 1) + ' ' + csCells(B, w),
+        ''.padEnd(lab) + '\u2500'.repeat(w * 2 - 1),
+        ''.padEnd(lab) + csCells(R, w)]), result: R,
+      note: `Work from the right. Write the sum bit and carry the 1 to the next column. Check in decimal: ${a} + ${b} = ${a + b}.` };
+  }
+  if(op === 'sub'){
+    const R = (a - b).toString(2), w = A.length, pa = A.padStart(w, '0'), pb = B.padStart(w, '0'), rr = R.padStart(w, '0');
+    const borrow = Array(w).fill(' '); let br = 0;
+    for(let i = w - 1; i >= 0; i--){ let d = (+pa[i]) - (+pb[i]) - br; if(d < 0){ d += 2; br = 1; if(i > 0) borrow[i - 1] = '1'; } else br = 0; }
+    const hl = s => s.replace(/1/g, '<i>1</i>');
+    return { pre: csPre([
+        'borrow'.padEnd(lab) + hl(borrow.join(' ')),
+        ''.padEnd(lab) + csCells(A, w),
+        '\u2212'.padEnd(lab - 1) + ' ' + csCells(B, w),
+        ''.padEnd(lab) + '\u2500'.repeat(w * 2 - 1),
+        ''.padEnd(lab) + rr.split('').join(' ')]), result: rr.replace(/^0+(?=.)/, ''),
+      note: `Work from the right. When a column shows 0 \u2212 1, borrow a 1 from the next column on the left (that makes 10 \u2212 1 = 1). Check in decimal: ${a} \u2212 ${b} = ${a - b}.` };
+  }
+  if(op === 'mul'){
+    const R = (a * b).toString(2), parts = [];
+    for(let i = 0; i < B.length; i++){ if(B[B.length - 1 - i] === '1') parts.push({ i, v:a << i }); }
+    const lines = parts.map(p => `Bit ${p.i} of ${B} is 1 \u2192 write ${A}${p.i ? ' shifted ' + p.i + ' place' + (p.i > 1 ? 's' : '') + ' to the left' : ''} = <b>${p.v.toString(2)}</b>`);
+    const zeros = B.split('').reverse().map((bit, i) => bit === '0' ? i : -1).filter(i => i >= 0);
+    if(zeros.length) lines.push(`Bit${zeros.length > 1 ? 's' : ''} ${zeros.join(', ')} ${zeros.length > 1 ? 'are' : 'is'} 0 \u2192 nothing to write.`);
+    lines.push(`Add the lines: ${parts.map(p => p.v.toString(2)).join(' + ')} = <b>${R}</b>`);
+    lines.push(`Check in decimal: ${a} \u00D7 ${b} = ${a * b}.`);
+    return { html: lines.map(csLine).join(''), result: R };
+  }
+  // division: long division one bit at a time
+  const R = (a / b).toString(2), lines = []; let r = 0, q = '';
+  A.split('').forEach(bit => {
+    r = r * 2 + (+bit); const fits = r >= b;
+    lines.push(`Bring down ${bit} \u2192 ${r.toString(2)} ${fits ? '\u2265' : '<'} ${B} \u2192 write <b>${fits ? 1 : 0}</b>${fits ? ` and subtract (left over ${(r - b).toString(2)})` : ''}`);
+    if(fits) r -= b; q += fits ? '1' : '0';
+  });
+  lines.push(`Drop the leading zeros: the quotient is <b>${q.replace(/^0+(?=.)/, '')}</b>.`);
+  lines.push(`Check in decimal: ${a} \u00F7 ${b} = ${a / b}.`);
+  return { html: lines.map(csLine).join(''), result: q.replace(/^0+(?=.)/, '') };
+}
+function csOpPane(op, from){
+  const O = ARITH[op], [a, b] = O.ex;
+  const rules = {
+    add:[['0 + 0','0'],['0 + 1','1'],['1 + 0','1'],['1 + 1','10','write 0, carry 1'],['1 + 1 + 1','11','write 1, carry 1']],
+    sub:[['0 \u2212 0','0'],['1 \u2212 0','1'],['1 \u2212 1','0'],['0 \u2212 1','1','borrow: 10 \u2212 1 = 1']],
+    mul:[['0 \u00D7 0','0'],['0 \u00D7 1','0'],['1 \u00D7 0','0'],['1 \u00D7 1','1'],['\u00D7 10 (\u00D7 2)','shift left','adds one 0 on the right']],
+    div:[['0 \u00F7 1','0'],['1 \u00F7 1','1'],['\u00F7 10 (\u00F7 2)','shift right','drops one bit on the right'],['\u00F7 0','not allowed','never divide by zero']]
+  }[op];
+  const chips = rules.map(r => `<div class="cs-rule"><b>${r[0]} = ${r[1]}</b>${r[2] ? `<span>${r[2]}</span>` : ''}</div>`).join('');
+  const w = csOpWorked(op, a, b);
+  const title = { add:'Column addition', sub:'Column subtraction', mul:'Shift and add', div:'Long division' }[op];
+  const baseNote = from === 8 ? 'Your numbers are octal. Turn every digit into 3 bits (or convert to decimal first), then use these binary rules.'
+                 : from === 16 ? 'Your numbers are hexadecimal. Turn every digit into 4 bits (or convert to decimal first), then use these binary rules.'
+                 : from === 10 ? 'Your numbers are decimal. Either convert them to binary first, or work in decimal and convert the result at the end.'
+                 : 'Your numbers are already binary, so you can use these rules directly.';
+  return `
+    <div class="cs-opgrid">
+      ${csSec(`Binary ${O.name.toLowerCase()} rules`, `<div class="cs-rules">${chips}</div>`)}
+      ${csSec('Your numbers', csLine(baseNote) + csLine(`<b>Tip:</b> ${O.tip.replace(/^[A-Za-z ]+?:\s*/, '')}`))}
+    </div>
+    ${csSec(`Worked example: ${a.toString(2)} ${O.show} ${b.toString(2)} (${a} ${O.show} ${b} in decimal)`, (w.pre || '') + (w.html || '') + (w.pre ? csLine(w.note) : ''), 'cs-worked')
+      .replace('class="cs-sec cs-worked"', `class="cs-sec cs-worked" data-op="${op}" data-result="${w.result}" data-title="${title}"`)}`;
+}
+
+/* ----- Quick facts tab ----- */
+function csFactsPane(kind, item){
+  const chips = (arr) => `<div class="cs-facts">${arr.map(x => `<div class="cs-fact"><b>${x[0]}</b><span>${x[1]}</span></div>`).join('')}</div>`;
+  const powers = (base, max, from) => { const r = []; for(let e = from || 0; e <= max; e++) r.push([`${csPow(base, e)}`, csComma(BigInt(base) ** BigInt(e))]); return r; };
+  const map = `<div class="cs-map">
+      <div class="cs-map-i ${kind === 'place' ? 'on' : ''}"><b>Binary \u21C4 Decimal</b><span>place values: 1, 2, 4, 8, 16 ...</span></div>
+      <div class="cs-map-i ${kind === 'oct' ? 'on' : ''}"><b>Binary \u21C4 Octal</b><span>groups of 3 bits</span></div>
+      <div class="cs-map-i ${kind === 'hex' ? 'on' : ''}"><b>Binary \u21C4 Hex</b><span>groups of 4 bits</span></div>
+    </div>`;
+  let a, b, c;
+  if(kind === 'place'){
+    a = csSec('Powers of 2 (first 17)', chips(powers(2, 16)), 'wide') + csSec('Big powers of 2', chips([...powers(2, 24, 20).filter((_, i) => i % 4 === 0), ...powers(2, 32, 30).filter((_, i) => i !== 1), ...powers(2, 64, 48).filter((_, i) => i % 16 === 0)]), 'wide');
+    b = csSec('How many bits do I need?', chips([['1 bit','0 to 1'],['2 bits','0 to 3'],['3 bits','0 to 7'],['4 bits','0 to 15'],['8 bits','0 to 255'],['16 bits','0 to 65,535'],['32 bits','0 to 4,294,967,295'],['64 bits','0 to 18,446,744,073,709,551,615']]));
+    c = csSec('Speed tricks', csLine('The last bit tells you odd or even: ends in <b>0</b> = even, ends in <b>1</b> = odd.') +
+      csLine('Add a <b>0</b> on the right to double the number: 101 (5) \u2192 1010 (10).') +
+      csLine('All ones is one less than the next power of 2: 1111 = 16 \u2212 1 = 15.')) +
+      csSec('Common mistakes', csLine('Start counting place values from the <b>right</b>, with 1.') + csLine('A 0 bit still takes up a place. Do not skip it.') + csLine('Leading zeros change nothing: 0011 = 11.'));
+  } else if(kind === 'oct'){
+    a = csSec('Powers of 8', chips(powers(8, 8)));
+    b = csSec('File permissions (a real use of octal)', chips([['4','read (r)'],['2','write (w)'],['1','execute (x)'],['755','111 101 101 = rwxr-xr-x']]));
+    c = csSec('How to group', csLine('Binary \u2192 octal: group from the <b>right</b> in 3s, then add zeros on the <b>left</b> if the last group is short.') +
+      csLine('Example: 1101 \u2192 001 101 \u2192 15.')) +
+      csSec('Common mistakes', csLine('Octal only uses digits <b>0 to 7</b>. There is no 8 or 9.') + csLine('Do not group from the left.') + csLine('Keep zeros inside a number: 705\u2088 = 111 000 101.'));
+  } else {
+    a = csSec('Powers of 16', chips(powers(16, 8)));
+    b = csSec('Letters and web colors', chips([['A','10'],['B','11'],['C','12'],['D','13'],['E','14'],['F','15'],['FF','255'],['#FF8800','red 255, green 136, blue 0']]));
+    c = csSec('How to group', csLine('Binary \u2192 hex: group from the <b>right</b> in 4s, then add zeros on the <b>left</b> if the last group is short.') +
+      csLine('Example: 101111 \u2192 0010 1111 \u2192 2F.')) +
+      csSec('Common mistakes', csLine('Remember A to F are the digits 10 to 15.') + csLine('Do not group from the left.') + csLine('Capital and small letters mean the same: 2f = 2F.'));
+  }
+  return `<div class="cs-factsgrid">${map}${a}${b}${c}</div>`;
+}
+
+/* ----- Converter tab ----- */
+const CS_RX = { 2:/^[01]+$/, 8:/^[0-7]+$/, 10:/^[0-9]+$/, 16:/^[0-9A-F]+$/ };
+const CS_NAME = { 2:'Binary', 8:'Octal', 10:'Decimal', 16:'Hexadecimal' };
+const CS_MAX = (1n << 64n) - 1n;           // the biggest 64-bit number
+function csParseBig(raw, base){ let n = 0n; const B = BigInt(base); for(const ch of raw) n = n * B + BigInt(parseInt(ch, 16)); return n; }
+function csConvPane(base, kind){
+  const start = base === 10 ? '45' : (45).toString(base).toUpperCase();
+  const btns = [2, 8, 10, 16].map(b => `<button type="button" class="cs-base ${b === base ? 'on' : ''}" data-base="${b}" aria-pressed="${b === base}" onclick="csConvBase(this)">${CS_NAME[b]}</button>`).join('');
+  const rows = [2, 8, 10, 16].map(b => `<div class="cs-out"><span class="cs-out-l">${CS_NAME[b]} <i>base ${b}</i></span><b class="cs-out-v" data-out="${b}">\u2014</b><button type="button" class="cs-copy" aria-label="Copy the ${CS_NAME[b].toLowerCase()} number" onclick="csCopy(this)">Copy</button></div>`).join('');
+  return `<div class="cs-conv" data-base="${base}">
+    <p class="cs-conv-intro">Type a number and see it in every number system, up to 64 bits. Great for checking your answers.</p>
+    <div class="cs-bases" role="group" aria-label="Number system of the number you type">${btns}</div>
+    <input class="cs-conv-in" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="90" value="${start}" oninput="csConvRun(this.closest('.cs-conv'))" aria-label="Number to convert">
+    <div class="cs-conv-err" role="status" aria-live="polite"></div>
+    <div class="cs-outs">${rows}</div>
+    <details class="cs-steps"><summary>\uD83D\uDCD6 Show the steps</summary><div class="cs-dgrid cs-steps-body"></div></details>
+  </div>
+  ${csBitsPane(kind || 'place')}`;
+}
+function csConvRun(root){
+  if(!root) return;
+  const base = +root.dataset.base, inp = root.querySelector('.cs-conv-in'), err = root.querySelector('.cs-conv-err');
+  const raw = inp.value.trim().toUpperCase().replace(/[\s_,]/g, '');
+  const outs = root.querySelectorAll('[data-out]'), steps = root.querySelector('.cs-steps'), body = root.querySelector('.cs-steps-body');
+  const clear = msg => { outs.forEach(o => { o.textContent = '\u2014'; o.classList.remove('has'); }); err.textContent = msg; err.classList.toggle('show', !!msg); inp.classList.toggle('bad', !!msg); if(body) body.innerHTML = ''; if(steps) steps.hidden = true; };
+  if(!raw){ clear(''); return; }
+  if(!CS_RX[base].test(raw)){
+    const ok = { 2:'binary only uses 0 and 1', 8:'octal only uses the digits 0 to 7', 10:'decimal only uses the digits 0 to 9', 16:'hexadecimal only uses 0 to 9 and A to F' }[base];
+    clear(`That is not a valid ${CS_NAME[base].toLowerCase()} number: ${ok}.`); return;
+  }
+  const n = csParseBig(raw, base);
+  if(n > CS_MAX){ clear('That number is too big. Try one up to 18,446,744,073,709,551,615 (64 bits).'); return; }
+  err.textContent = ''; err.classList.remove('show'); inp.classList.remove('bad');
+  outs.forEach(o => {
+    const b = +o.dataset.out; let s = n.toString(b).toUpperCase();
+    if(b === 2 || b === 16) s = csGroup(s, 4); else if(b === 10) s = csComma(s);
+    o.textContent = s; o.classList.add('has');
+  });
+  if(body){ body.innerHTML = csConvSteps(n, base, raw).map(csExHtml).join(''); steps.hidden = false; }
+}
+function csConvBase(btn){
+  const root = btn.closest('.cs-conv'), inp = root.querySelector('.cs-conv-in'), old = +root.dataset.base, nb = +btn.dataset.base;
+  const raw = inp.value.trim().toUpperCase().replace(/[\s_,]/g, '');
+  if(raw && CS_RX[old].test(raw)){ const n = csParseBig(raw, old); if(n <= CS_MAX) inp.value = n.toString(nb).toUpperCase(); }
+  root.dataset.base = nb;
+  root.querySelectorAll('.cs-base').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  csConvRun(root);
+}
+
+/* ================= CHEAT SHEET EXTRAS: more examples, practice, step-by-step converter, bit flipper =================
+   Every example and every practice answer is CALCULATED by these functions (never typed by hand), so they cannot be wrong.
+   Each generator returns { tag, title, lines[], answer, value }. `value` is the plain result, used to mark practice answers. */
+function csDigit(v){ return v.toString(16).toUpperCase(); }
+function csTrim0(s){ return s.replace(/^0+(?=.)/, ''); }
+function csLow(b){ return CS_NAME[b].toLowerCase(); }
+
+function csN(x){ const b = BigInt(x); return b >= 10000n ? csComma(b) : b.toString(); }
+function csTermList(arr, max){ return arr.length <= max ? arr.map(csN).join(' + ') : arr.slice(0, 6).map(csN).join(' + ') + ` + \u2026 (${arr.length} terms)`; }
+function csExBinToDec(s){
+  const len = s.length, val = BigInt('0b' + s), ones = [];
+  s.split('').forEach((ch, i) => { if(ch === '1') ones.push(len - 1 - i); });
+  const used = ones.map(p => 1n << BigInt(p));
+  const addLine = !used.length ? 'There are no 1s, so the value is <b>0</b>.'
+    : `Add the place values that sit above a 1: <b>${csTermList(used, len <= 12 ? 99 : 8)}${used.length > 1 ? ' = ' + csN(val) : ''}</b>`;
+  let lines;
+  if(len <= 12){
+    lines = [`Place values: ${s.split('').map((_, i) => csN(1n << BigInt(len - 1 - i))).join(' ')}`, `Bits: ${s.split('').join(' ')}`, addLine];
+  } else {
+    lines = [`Bits: ${csGroup(s, 4)}`, `The 1s are at places ${ones.length <= 12 ? ones.join(', ') : ones.length + ' different places'} (count from 0 on the right).`, addLine];
+  }
+  return { tag:'toDec', title:`Binary \u2192 decimal: ${csGroup(s, 4)}`, value:val.toString(), lines,
+    answer:`${csGroup(s, 4)} in binary = ${csN(val)} in decimal` };
+}
+function csExDecToBinSub(num){
+  const lines = []; let left = num, bits = '';
+  for(let e = 7; e >= 0; e--){
+    const w = 1 << e;
+    if(left >= w){ bits += '1'; lines.push(`${w} fits into ${left} \u2192 <b>1</b> (${left - w} left)`); left -= w; }
+    else { bits += '0'; lines.push(`${w} is bigger than ${left} \u2192 <b>0</b>`); }
+  }
+  return { tag:'fromDec', title:`Decimal \u2192 binary (subtract method): ${num}`, value:csTrim0(bits), lines,
+    answer:`${num} in decimal = ${csTrim0(bits)} in binary` };
+}
+function csExDecToBase(num, base){
+  const name = csLow(base), B = BigInt(base);
+  let q = BigInt(num);
+  if(q === 0n) return { tag:'fromDec', title:`Decimal \u2192 ${name}: 0`, value:'0', lines:['Zero is written 0 in every number system.'], answer:`0 in decimal = 0 in ${name}` };
+  const orig = q, steps = [], digits = [];
+  while(q > 0n){
+    const r = q % B, nq = q / B;
+    steps.push(`${csN(q)} \u00F7 ${base} = ${csN(nq)} remainder ${r}${r > 9n ? ' (' + csDigit(Number(r)) + ')' : ''}`);
+    digits.push(csDigit(Number(r))); q = nq;
+  }
+  digits.reverse();
+  const shown = steps.length > 12 ? [...steps.slice(0, 6), `\u2026 (${steps.length - 9} more steps, keep dividing the same way) \u2026`, ...steps.slice(-3)] : steps;
+  const val = digits.join('');
+  return { tag:'fromDec', title:`Decimal \u2192 ${name} (divide by ${base}): ${csN(orig)}`, value:val,
+    lines:[...shown, `Read the remainders from the bottom up: <b>${val}</b>`], answer:`${csN(orig)} in decimal = ${val} in ${name}` };
+}
+function csExGroup(s, size, base){
+  const pad = (size - (s.length % size)) % size, p = '0'.repeat(pad) + s, groups = [];
+  for(let i = 0; i < p.length; i += size) groups.push(p.slice(i, i + size));
+  const digits = groups.map(g => csDigit(parseInt(g, 2))), name = csLow(base), val = csTrim0(digits.join(''));
+  const lines = [`Group from the right, ${size} bits at a time: ${csGroup(s, size)}`];
+  if(pad) lines.push(`The first group is short, so add ${pad} zero${pad > 1 ? 's' : ''} on its left: ${groups.join(' ')}`);
+  if(groups.length <= 8) lines.push(groups.map((g, i) => `${g} = ${digits[i]}`).join(', '));
+  else lines.push(`Each group of ${size} bits becomes one digit: ${digits.join(' ')}`);
+  lines.push(`Write the digits side by side: <b>${digits.join('')}</b>`);
+  return { tag:'group', title:`Binary \u2192 ${name}: ${csGroup(s, 4)}`, value:val, lines, answer:`${csGroup(s, 4)} in binary = ${val} in ${name}` };
+}
+function csExUngroup(s, size, base){
+  const parts = s.split('').map(ch => parseInt(ch, base).toString(2).padStart(size, '0'));
+  const joined = parts.join(''), val = csTrim0(joined), name = csLow(base);
+  const lines = [s.length <= 8 ? s.split('').map((ch, i) => `${ch} = ${parts[i]}`).join(', ') : `Each digit becomes ${size} bits: ${parts.join(' ')}`, `Join the groups: ${s.length <= 8 ? joined : csGroup(joined, 4)}`];
+  if(val !== joined) lines.push(`Drop the zeros at the very front: <b>${s.length <= 8 ? val : csGroup(val, 4)}</b>`);
+  return { tag:'group', title:`${CS_NAME[base]} \u2192 binary: ${s}`, value:val, lines, answer:`${s} in ${name} = ${csGroup(val, 4)} in binary` };
+}
+function csExBaseToDec(s, base){
+  const n = s.length, name = csLow(base), B = BigInt(base);
+  const terms = s.split('').map((ch, i) => ({ ch, v:BigInt(parseInt(ch, base)), w:B ** BigInt(n - 1 - i) }));
+  const total = terms.reduce((a, t) => a + t.v * t.w, 0n);
+  const label = t => `${t.ch}${t.v > 9n ? ' (' + t.v + ')' : ''} \u00D7 ${csN(t.w)}`;
+  let lines;
+  if(n <= 8){
+    lines = [`Place values: ${terms.map(t => csN(t.w)).join(' ')}`, terms.map(label).join(' + '),
+      `${terms.map(t => csN(t.v * t.w)).join(' + ')}${terms.length > 1 ? ' = <b>' + csN(total) + '</b>' : ''}`];
+  } else {
+    const nz = terms.filter(t => t.v !== 0n);
+    lines = [`Each place is worth ${base} times the one on its right (\u2026, ${csN(B ** 2n)}, ${base}, 1).`,
+      `Only the non-zero digits add something: ${nz.slice(0, 8).map(label).join(' + ')}${nz.length > 8 ? ' + \u2026' : ''}`,
+      `Add everything up: <b>${csN(total)}</b>`];
+  }
+  return { tag:'toDec', title:`${CS_NAME[base]} \u2192 decimal: ${s}`, value:total.toString(), lines, answer:`${s} in ${name} = ${csN(total)} in decimal` };
+}
+
+function csExHtml(ex){
+  return `<div class="cs-sec cs-excard" data-tag="${ex.tag}"><h6>${ex.title}</h6>${ex.lines.map(csLine).join('')}<div class="cs-ans">\u2705 ${ex.answer}</div></div>`;
+}
+
+/* ----- More examples tab ----- */
+function csExampleList(kind){
+  if(kind === 'place') return [
+    ...['101','1101','10010','11001100','10101010','11111111','01000001'].map(csExBinToDec),
+    ...[45, 100, 200].map(csExDecToBinSub), ...[13, 37, 77, 156].map(n => csExDecToBase(n, 2))];
+  if(kind === 'oct') return [
+    ...['110101','1101011','101110','1000001','11111111'].map(s => csExGroup(s, 3, 8)),
+    ...['345','72','1604','777'].map(s => csExUngroup(s, 3, 8)),
+    ...['17','345','1604'].map(s => csExBaseToDec(s, 8)),
+    ...[100, 229, 500].map(n => csExDecToBase(n, 8))];
+  return [
+    ...['11010111','101111','1111111100','10100101','1001110'].map(s => csExGroup(s, 4, 16)),
+    ...['2F','A5','3C9','FF'].map(s => csExUngroup(s, 4, 16)),
+    ...['2F','A5','FF','1C','3E8'].map(s => csExBaseToDec(s, 16)),
+    ...[255, 300, 1000].map(n => csExDecToBase(n, 16))];
+}
+function csExamplesPane(kind){
+  const list = csExampleList(kind), tags = [];
+  list.forEach(e => { if(tags.indexOf(e.tag) < 0) tags.push(e.tag); });
+  const label = { toDec:'To decimal', fromDec:'From decimal', group: kind === 'oct' ? 'Binary \u21C4 octal' : 'Binary \u21C4 hex' };
+  const chips = ['all', ...tags].map((t, i) => `<button type="button" class="cs-base ${i === 0 ? 'on' : ''}" data-tag="${t}" aria-pressed="${i === 0}" onclick="csExFilter(this)">${t === 'all' ? 'All (' + list.length + ')' : label[t]}</button>`).join('');
+  return `<p class="cs-hint"><span aria-hidden="true">\uD83D\uDCDD</span> ${list.length} worked examples. Pick a type, then follow the steps.</p>
+    <div class="cs-bases cs-exfilter" role="group" aria-label="Filter examples">${chips}</div>
+    <div class="cs-dgrid cs-exgrid">${list.map(csExHtml).join('')}</div>`;
+}
+function csExFilter(btn){
+  const pane = btn.closest('.cs-pane'), tag = btn.dataset.tag;
+  pane.querySelectorAll('.cs-exfilter .cs-base').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  pane.querySelectorAll('.cs-excard').forEach(c => { c.hidden = !(tag === 'all' || c.dataset.tag === tag); });
+}
+
+/* ----- Practice tab: random questions, checked by the program ----- */
+const CS_QLEVELS = { easy:'Easy', medium:'Medium', hard:'Hard', expert:'Expert' };
+function csRand(a, b){ return a + Math.floor(Math.random() * (b - a + 1)); }
+function csQuizMake(kind, level, avoid){
+  const range = kind === 'place' ? { easy:[3, 4], medium:[5, 6], hard:[7, 8], expert:[12, 16] }[level] : { easy:[3, 6], medium:[6, 9], hard:[9, 12], expert:[13, 24] }[level];
+  const types = kind === 'place' ? ['b2d', 'd2b'] : kind === 'oct' ? ['b2o', 'o2b', 'o2d', 'd2o'] : ['b2h', 'h2b', 'h2d', 'd2h'];
+  let q, tries = 0;
+  do {
+    const len = csRand(range[0], range[1]), n = csRand(Math.pow(2, len - 1), Math.pow(2, len) - 1), t = types[csRand(0, types.length - 1)];
+    const B = kind === 'oct' ? 8 : 16, size = kind === 'oct' ? 3 : 4;
+    if(t === 'b2d'){ q = { num:n.toString(2), from:2, to:10, ex:csExBinToDec(n.toString(2)) }; }
+    else if(t === 'd2b'){ q = { num:String(n), from:10, to:2, ex:csExDecToBase(n, 2) }; }
+    else if(t[0] === 'b'){ q = { num:n.toString(2), from:2, to:B, ex:csExGroup(n.toString(2), size, B) }; }
+    else if(t[2] === 'b'){ q = { num:n.toString(B).toUpperCase(), from:B, to:2, ex:csExUngroup(n.toString(B).toUpperCase(), size, B) }; }
+    else if(t[2] === 'd'){ q = { num:n.toString(B).toUpperCase(), from:B, to:10, ex:csExBaseToDec(n.toString(B).toUpperCase(), B) }; }
+    else { q = { num:String(n), from:10, to:B, ex:csExDecToBase(n, B) }; }
+    q.answer = q.ex.value;
+    tries++;
+  } while(avoid && q.num === avoid.num && q.from === avoid.from && q.to === avoid.to && tries < 20);
+  return q;
+}
+function csQuizNormalise(s, base){
+  s = String(s || '').trim().toUpperCase().replace(/[\s_,]/g, '');
+  return base === 10 ? s.replace(/^0+(?=.)/, '') : csTrim0(s);
+}
+function csQuizPane(){
+  const lv = Object.keys(CS_QLEVELS).map((k, i) => `<button type="button" class="cs-base ${i === 0 ? 'on' : ''}" data-level="${k}" aria-pressed="${i === 0}" onclick="csQuizLevel(this)">${CS_QLEVELS[k]}</button>`).join('');
+  return `<div class="cs-quiz" data-ready="0">
+    <p class="cs-hint"><span aria-hidden="true">\uD83C\uDFAF</span> Endless practice. Every question is new, and the program checks your answer.</p>
+    <div class="cs-bases" role="group" aria-label="Difficulty">${lv}</div>
+    <div class="cs-qscore" aria-live="polite"><span>\u2705 Correct <b data-s="ok">0</b></span><span>\uD83D\uDCDD Tried <b data-s="all">0</b></span><span>\uD83D\uDD25 Streak <b data-s="streak">0</b></span><span>\uD83C\uDFC6 Best <b data-s="best">0</b></span></div>
+    <div class="cs-qbox"><div class="cs-qask"></div><div class="cs-qnum"></div></div>
+    <div class="cs-qrow">
+      <input class="cs-q-in" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-label="Your answer" onkeydown="if(event.key==='Enter'){event.preventDefault();csQuizCheck(this.closest('.cs-quiz'));}">
+      <button type="button" class="cs-qbtn go" onclick="csQuizCheck(this.closest('.cs-quiz'))">Check</button>
+    </div>
+    <div class="cs-qfb" role="status" aria-live="polite"></div>
+    <div class="cs-qactions">
+      <button type="button" class="cs-qbtn" data-act="show" onclick="csQuizShow(this.closest('.cs-quiz'))">Show solution</button>
+      <button type="button" class="cs-qbtn" onclick="csQuizNew(this.closest('.cs-quiz'))">Next question \u2192</button>
+    </div>
+    <div class="cs-qsol"></div>
+  </div>`;
+}
+function csQuizState(root){
+  if(!root._s) root._s = { level:'easy', ok:0, all:0, streak:0, best:0, cur:null, done:false };
+  return root._s;
+}
+function csQuizScore(root){
+  const s = csQuizState(root);
+  ['ok', 'all', 'streak', 'best'].forEach(k => { const el = root.querySelector(`[data-s="${k}"]`); if(el) el.textContent = s[k]; });
+}
+function csQuizNew(root){
+  if(!root) return;
+  const s = csQuizState(root), kind = root.closest('.cheat').dataset.kind;
+  s.cur = csQuizMake(kind, s.level, s.cur); s.done = false;
+  const q = s.cur, word = { 2:'binary', 8:'octal', 10:'decimal', 16:'hexadecimal' };
+  root.querySelector('.cs-qask').textContent = `Convert from ${word[q.from]} to ${word[q.to]}:`;
+  root.querySelector('.cs-qnum').textContent = q.from === 2 ? csGroup(q.num, 4) : q.num;
+  const inp = root.querySelector('.cs-q-in'); inp.value = ''; inp.disabled = false; inp.classList.remove('bad', 'good');
+  const fb = root.querySelector('.cs-qfb'); fb.textContent = ''; fb.className = 'cs-qfb';
+  root.querySelector('.cs-qsol').innerHTML = '';
+  root.querySelector('[data-act="show"]').disabled = false;
+  root.dataset.ready = '1'; csQuizScore(root);
+  try{ inp.focus({ preventScroll:true }); }catch(_){}
+}
+function csQuizLevel(btn){
+  const root = btn.closest('.cs-quiz'); csQuizState(root).level = btn.dataset.level;
+  root.querySelectorAll('[data-level]').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  csQuizNew(root);
+}
+function csQuizCheck(root){
+  const s = csQuizState(root); if(!s.cur || s.done) return;
+  const inp = root.querySelector('.cs-q-in'), fb = root.querySelector('.cs-qfb'), q = s.cur;
+  const mine = csQuizNormalise(inp.value, q.to);
+  if(!mine){ fb.className = 'cs-qfb bad'; fb.textContent = 'Type your answer first.'; return; }
+  const rx = CS_RX[q.to];
+  if(!rx.test(mine)){ fb.className = 'cs-qfb bad'; fb.textContent = `That is not a valid ${csLow(q.to)} number. Check the digits you used.`; return; }
+  s.all++; s.done = true; inp.disabled = true;
+  if(mine === q.answer){
+    s.ok++; s.streak++; if(s.streak > s.best) s.best = s.streak;
+    inp.classList.add('good'); fb.className = 'cs-qfb good'; fb.textContent = s.streak > 2 ? `Correct! ${s.streak} in a row!` : 'Correct! Well done.';
+  } else {
+    s.streak = 0; inp.classList.add('bad'); fb.className = 'cs-qfb bad';
+    fb.innerHTML = `Not quite. You wrote <b>${escapeHtml(mine)}</b>. The answer is <b>${escapeHtml(q.to === 2 ? csGroup(q.answer, 4) : q.answer)}</b>.`;
+    root.querySelector('.cs-qsol').innerHTML = csExHtml(q.ex);
+  }
+  root.querySelector('[data-act="show"]').disabled = true;
+  csQuizScore(root);
+}
+function csQuizShow(root){
+  const s = csQuizState(root); if(!s.cur) return;
+  root.querySelector('.cs-qsol').innerHTML = csExHtml(s.cur.ex);
+}
+
+/* ----- Converter helpers: step-by-step working, copy buttons and the bit flipper ----- */
+function csConvSteps(n, base, raw){
+  const bin = n.toString(2);
+  if(base === 2)  return [csExBinToDec(raw), csExGroup(raw, 3, 8), csExGroup(raw, 4, 16)];
+  if(base === 8)  return [csExUngroup(raw, 3, 8), csExBaseToDec(raw, 8), csExGroup(bin, 4, 16)];
+  if(base === 16) return [csExUngroup(raw, 4, 16), csExBaseToDec(raw, 16), csExGroup(bin, 3, 8)];
+  return [csExDecToBase(n, 2), csExGroup(bin, 3, 8), csExGroup(bin, 4, 16)];
+}
+function csCopy(btn){
+  const out = btn.parentElement.querySelector('.cs-out-v'), txt = out ? out.textContent.replace(/[\s,]/g, '') : '';
+  if(!txt || txt === '\u2014') return;
+  const done = () => { btn.textContent = 'Copied \u2713'; btn.classList.add('ok'); setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('ok'); }, 1300); };
+  const fallback = () => { const t = document.createElement('textarea'); t.value = txt; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); try{ document.execCommand('copy'); done(); }catch(_){} t.remove(); };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done, fallback); } else fallback();
+}
+/* ----- Big numbers: place values all the way up to a 64-bit number (BigInt keeps every digit exact) ----- */
+function csComma(v){ return v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+function csOrd(n){ const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+// Short form for a tile: exact below one million, then "2.15 billion" (the exact value is always in the detail card).
+function csShortVal(v){
+  v = BigInt(v);
+  if(v < 1000000n) return csComma(v);
+  const names = [[10n ** 18n, 'quintillion'], [10n ** 15n, 'quadrillion'], [10n ** 12n, 'trillion'], [10n ** 9n, 'billion'], [10n ** 6n, 'million']];
+  for(const [d, nm] of names){
+    if(v >= d){
+      const x = Number((v * 200n + d) / (2n * d)) / 100;
+      return `${x.toFixed(2).replace(/\.?0+$/, '')} ${nm}`;
+    }
+  }
+  return csComma(v);
+}
+const CS_BIG_NOTES = {
+  8:'The first place of the second byte. One byte stops at 255, so 256 needs a ninth bit.',
+  10:'1,024 is the computer "kilo": 1 KiB = 1,024 bytes.',
+  15:'The top bit of a 16-bit number (2 bytes). 16 bits hold 0 to 65,535.',
+  16:'65,536 is how many different values 16 bits can make (0 to 65,535).',
+  20:'1,048,576 bytes = 1 MiB.',
+  23:'The top bit of a 24-bit number. 24 bits make 16,777,216 colours (8 bits each for red, green and blue).',
+  30:'1,073,741,824 bytes = 1 GiB.',
+  31:'The top bit of a 32-bit number. 32 bits hold 0 to 4,294,967,295.',
+  32:'4,294,967,296 is the number of possible IPv4 addresses.',
+  63:'The top bit of a 64-bit number. 64 bits hold 0 to 18,446,744,073,709,551,615.'
+};
+function csPlaceDetailBig(e){
+  const E = BigInt(e), val = 1n << E, mid = Math.floor(e / 2), midV = 1n << BigInt(mid), n = val | midV | 1n, bin = n.toString(2);
+  let left = n, rows = '';
+  const ones = [[val, e], [midV, mid], [1n, 0]];
+  ones.forEach(([pv, p], idx) => {
+    rows += `<tr><td>${csN(pv)}</td><td>${csN(left)} \u2265 ${csN(pv)}</td><td><b class="on">1</b></td><td>${csN(left)} \u2212 ${csN(pv)} = ${csN(left - pv)}</td></tr>`;
+    left -= pv;
+    if(idx < ones.length - 1){
+      const gap = p - ones[idx + 1][1] - 1;
+      if(gap > 0) rows += `<tr class="cs-gaprow"><td colspan="4">The ${gap} place${gap > 1 ? 's' : ''} in between (${csPow(2, ones[idx + 1][1] + 1)} to ${csPow(2, p - 1)}) are all too big, so each is a <b class="zero">0</b>.</td></tr>`;
+    }
+  });
+  const secs =
+    csSec('What it means', csLine(`A <b>1</b> in this place adds <b>${csComma(val)}</b> to the number. A <b>0</b> adds nothing.`) +
+      csLine(`This is bit number <b>${e}</b> (counting from 0 on the right). It sits in <b>byte ${Math.floor(e / 8) + 1}</b>.`) +
+      csLine(`Every place is double the one before it: ${csComma(val / 2n)} \u00D7 2 = ${csComma(val)}.`) +
+      csLine(`As a binary number it is <b>${csGroup('1' + '0'.repeat(e), 4)}</b> (a 1 followed by ${e} zeros).`) +
+      csLine(`${csPow(2, e)} means 2 multiplied by itself ${e} times.`)) +
+    csSec('Binary \u2192 Decimal example', csLine(`<b>${csGroup(bin, 4)}</b>`) +
+      csLine(`Only three places are 1: ${csN(val)} + ${csN(midV)} + 1 = <b>${csN(n)}</b>`) + csLine('Add the place value of every 1. Skip the 0s.')) +
+    csSec(`Decimal \u2192 Binary example: ${csN(n)}`,
+      `<div class="cs-tablewrap"><table class="cs-table"><thead><tr><th>Place</th><th>Does it fit?</th><th>Bit</th><th>Left over</th></tr></thead><tbody>${rows}</tbody></table></div>` +
+      csLine(`Every other place is 0, so the binary number is <b>${csGroup(bin, 4)}</b>.`), 'wide') +
+    csSec('Good to know', csLine(`${e + 1} bits can hold the numbers 0 to <b>${csComma((1n << (E + 1n)) - 1n)}</b>.`) +
+      csLine(`This place is worth exactly 1 more than all the smaller places added together (${csN(val - 1n)} + 1 = ${csN(val)}).`) +
+      (CS_BIG_NOTES[e] ? csLine(CS_BIG_NOTES[e]) : ''));
+  return csDetail(e, `Bit ${e}`, `${csPow(2, e)} = ${csComma(val)}`, secs);
+}
+// A place value of the octal (8) or hexadecimal (16) system: 8^k or 16^k.
+function csPlaceDetailBase(base, k){
+  const B = BigInt(base), val = B ** BigInt(k), bpd = base === 8 ? 3 : 4, name = base === 8 ? 'octal' : 'hexadecimal', Name = name[0].toUpperCase() + name.slice(1);
+  const top = base === 8 ? 5 : 10, midD = base === 8 ? 3 : 12, low = base === 8 ? 7 : 15;
+  const digs = Array(k + 1).fill(0);
+  digs[k] = top; if(k >= 2) digs[Math.floor(k / 2)] = midD; if(k >= 1) digs[0] = low;
+  const s = digs.slice().reverse().map(csDigit).join('');
+  const terms = []; digs.forEach((d, i) => { if(d) terms.push({ d, w: B ** BigInt(i) }); });
+  terms.reverse();
+  const total = terms.reduce((a, t) => a + BigInt(t.d) * t.w, 0n);
+  const parts = s.split('').map(ch => parseInt(ch, base).toString(2).padStart(bpd, '0'));
+  const lab = t => `${csDigit(t.d)}${t.d > 9 ? ' (' + t.d + ')' : ''} \u00D7 ${csN(t.w)}`;
+  const secs =
+    csSec('What it means', csLine(`Each 1 in this place is worth <b>${csComma(val)}</b>. A digit <b>d</b> here adds d \u00D7 ${csComma(val)}.`) +
+      csLine(`It is the <b>${csOrd(k + 1)}</b> place from the right.`) +
+      csLine(`Because ${base} = ${csPow(2, bpd)}, the value ${csPow(base, k)} is the same as <b>${csPow(2, bpd * k)}</b> = ${csComma(val)}.`) +
+      csLine(k ? `Every place is ${base} times the one before it: ${csComma(val / B)} \u00D7 ${base} = ${csComma(val)}.` : 'The first place is always worth 1.')) +
+    csSec(`${Name} \u2192 Decimal example`, csLine(`${Name} <b>${s}</b>`) + csLine(`${terms.map(lab).join(' + ')}`) +
+      csLine(`${terms.map(t => csN(BigInt(t.d) * t.w)).join(' + ')}${terms.length > 1 ? ' = ' : ' = '}<b>${csN(total)}</b>`) + csLine('Zeros add nothing, so only the non-zero digits are listed.')) +
+    csSec(`${Name} \u2192 Binary example`, csLine(`${Name} <b>${s}</b>: every digit becomes ${bpd} bits.`) + csLine(`${parts.join(' ')}`) +
+      csLine(`Join them: <b>${csGroup(parts.join(''), 4)}</b>`)) +
+    csSec('Good to know', csLine(`The biggest number with ${k + 1} ${name} digit${k ? 's' : ''} is ${csPow(base, k + 1)} \u2212 1 = <b>${csComma(val * B - 1n)}</b>.`) +
+      csLine(`${k + 1} ${name} digit${k ? 's' : ''} use exactly ${bpd * (k + 1)} bits.`));
+  return csDetail(k, csPow(base, k), `= ${csComma(val)}`, secs);
+}
+function csPlaceDetail(e){ return e < 8 ? csPlaceDetailSmall(e) : csPlaceDetailBig(e); }
+
+/* ----- Explore tab: digits or place values, shown a page (a byte) at a time ----- */
+function csExploreModel(kind, mode){
+  if(mode === 'digits'){
+    const base = kind === 'oct' ? 8 : 16, bits = kind === 'oct' ? 3 : 4;
+    return { base, count:base, per:base, place:false,
+      tile: i => ({ main:csDigit(i), sub:csBits(i, bits), title:`${i} = ${csBits(i, bits)}` }),
+      hint:`Tap a digit to see its ${bits}-bit pattern, with examples both ways.`,
+      detail: i => kind === 'oct' ? csOctDetail(i) : csHexDetail(i) };
+  }
+  const base = kind === 'place' ? 2 : kind === 'oct' ? 8 : 16, count = kind === 'place' ? 64 : kind === 'oct' ? 22 : 16;
+  return { base, count, per:8, place:true,
+    tile: e => { const v = BigInt(base) ** BigInt(e); return { main:csShortVal(v), sub:`${base}<sup>${e}</sup>`, title:csComma(v) }; },
+    hint: kind === 'place' ? 'Tap a place value to see what it means, with examples. Use the Byte buttons to go past 128, all the way to 2\u2076\u00B3.'
+        : `Tap a place value to see what it means. Place values of ${kind === 'oct' ? 'octal are powers of 8' : 'hexadecimal are powers of 16'}.`,
+    detail: e => base === 2 ? csPlaceDetail(e) : csPlaceDetailBase(base, e) };
+}
+function csExploreInner(kind, mode, page){
+  const M = csExploreModel(kind, mode), pages = Math.ceil(M.count / M.per), from = page * M.per, to = Math.min(M.count, from + M.per);
+  let tiles = '';
+  for(let i = from; i < to; i++){
+    const t = M.tile(i), cls = t.main.length > 11 ? 'xlong' : t.main.length > 7 ? 'long' : '';
+    tiles += `<button type="button" class="cs-tile ${cls}" data-i="${i}" title="${t.title}" aria-pressed="false" onclick="csExplorePick(this)"><b>${t.main}</b><span>${t.sub}</span></button>`;
+  }
+  let chips = '', head = '';
+  if(M.place){
+    const lo = BigInt(M.base) ** BigInt(from), hi = BigInt(M.base) ** BigInt(to - 1);
+    if(pages > 1) chips = Array.from({ length:pages }, (_, p) => {
+      const f = p * M.per, t = Math.min(M.count, f + M.per) - 1;
+      return `<button type="button" class="cs-base ${p === page ? 'on' : ''}" data-page="${p}" aria-pressed="${p === page}" onclick="csExplorePage(this)">${M.base === 2 ? 'Byte ' + (p + 1) : csPow(M.base, f) + '\u2013' + csPow(M.base, t)}</button>`;
+    }).join('');
+    head = (M.base === 2 ? `Byte ${page + 1} \u00B7 bits ${from} to ${to - 1} \u00B7 ` : '') +
+      `place values ${csPow(M.base, from)} to ${csPow(M.base, to - 1)} (${csShortVal(lo)} to ${csShortVal(hi)})`;
+  }
+  return { hint:`<span aria-hidden="true">\uD83D\uDC46</span> ${M.hint}`, chips, head, tiles };
+}
+function csExploreFrame(kind){
+  const mode = kind === 'place' ? 'place' : 'digits', I = csExploreInner(kind, mode, 0);
+  const modes = kind === 'place' ? '' : `<div class="cs-bases cs-modes" role="group" aria-label="What to explore">
+      <button type="button" class="cs-base on" data-mode="digits" aria-pressed="true" onclick="csExploreMode(this)">Digits</button>
+      <button type="button" class="cs-base" data-mode="place" aria-pressed="false" onclick="csExploreMode(this)">Place values</button></div>`;
+  return `<div class="cs-explore" data-mode="${mode}" data-page="0">${modes}
+    <p class="cs-hint">${I.hint}</p>
+    <div class="cs-bases cs-pages" role="group" aria-label="Pages of place values">${I.chips}</div>
+    <div class="cs-pagehead">${I.head}</div>
+    <div class="cs-tiles cs-tiles-8">${I.tiles}</div>
+    <div class="cs-details" aria-live="polite"></div>
+  </div>`;
+}
+function csExploreRedraw(box){
+  const kind = box.closest('.cheat').dataset.kind, I = csExploreInner(kind, box.dataset.mode, +box.dataset.page);
+  box.querySelector('.cs-hint').innerHTML = I.hint;
+  box.querySelector('.cs-pages').innerHTML = I.chips;
+  box.querySelector('.cs-pagehead').innerHTML = I.head;
+  box.querySelector('.cs-tiles').innerHTML = I.tiles;
+  box.querySelector('.cs-details').innerHTML = '';
+  box.closest('.cs-pane').classList.remove('has-open');
+}
+function csExploreMode(btn){
+  const box = btn.closest('.cs-explore'); box.dataset.mode = btn.dataset.mode; box.dataset.page = 0;
+  box.querySelectorAll('.cs-modes .cs-base').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  csExploreRedraw(box);
+}
+function csExplorePage(btn){ const box = btn.closest('.cs-explore'); box.dataset.page = btn.dataset.page; csExploreRedraw(box); }
+function csExplorePick(btn){
+  const box = btn.closest('.cs-explore'), kind = btn.closest('.cheat').dataset.kind, i = +btn.dataset.i, was = btn.classList.contains('on');
+  box.querySelectorAll('.cs-tile').forEach(t => { t.classList.remove('on'); t.setAttribute('aria-pressed', 'false'); });
+  const host = box.querySelector('.cs-details'); host.innerHTML = '';
+  btn.closest('.cs-pane').classList.toggle('has-open', !was);
+  if(was) return;
+  btn.classList.add('on'); btn.setAttribute('aria-pressed', 'true');
+  host.innerHTML = csExploreModel(kind, box.dataset.mode).detail(i);
+  const d = host.querySelector('.cs-detail');
+  if(d){ d.hidden = false; try{ d.scrollIntoView({ block:'nearest', behavior: skReducedMotion() ? 'auto' : 'smooth' }); }catch(_){} }
+}
+
+/* ----- Flip the bits: 8, 16, 32 or 64 bits, one byte per row ----- */
+const CS_FLIP = {
+  place:{ widths:[8, 16, 32, 64], row:8, group:4, base:0 },
+  hex:  { widths:[8, 16, 32, 64], row:8, group:4, base:16 },
+  oct:  { widths:[9, 18, 36, 63], row:9, group:3, base:8 }
+};
+function csFlipGrid(kind, w){
+  const C = CS_FLIP[kind], rows = Math.ceil(w / C.row);
+  let html = '';
+  for(let r = rows - 1; r >= 0; r--){
+    let groups = '';
+    for(let g = C.row / C.group - 1; g >= 0; g--){
+      const gi = r * (C.row / C.group) + g;
+      let bits = '';
+      for(let j = C.group - 1; j >= 0; j--){
+        const i = gi * C.group + j;
+        let label;
+        if(kind === 'place'){
+          const v = 1n << BigInt(i);
+          label = `<span class="w-full">${csComma(v)}</span><span class="w-pow">2<sup>${i}</sup></span>`;
+        } else label = `<span class="w-full w-local">${1 << j}</span>`;
+        const big = kind === 'place' ? `${i >= 27 ? ' b-d' : ''}${i >= 14 ? ' b-m' : ''}` : '';
+        bits += `<button type="button" class="cs-bit${big}" data-i="${i}" aria-pressed="false" aria-label="Bit ${i}, currently 0" onclick="csBitFlip(this)">${label}<b>0</b></button>`;
+      }
+      groups += `<div class="cs-fgroup"><div class="cs-fbits" style="--n:${C.group}">${bits}</div>${C.base ? `<span class="cs-fdigit" data-g="${gi}">0</span>` : ''}</div>`;
+    }
+    const lab = kind === 'oct' ? `Digits ${r * 3 + 1}\u2013${r * 3 + 3}` : `Byte ${r + 1}`;
+    html += `<div class="cs-frow"><span class="cs-frow-l">${lab}</span><div class="cs-fgroups">${groups}</div></div>`;
+  }
+  return html;
+}
+function csBitsPane(kind){
+  const C = CS_FLIP[kind];
+  const chips = C.widths.map((w, i) => `<button type="button" class="cs-base ${i === 0 ? 'on' : ''}" data-w="${w}" aria-pressed="${i === 0}" onclick="csFlipWidth(this)">${w} bits<small>${kind === 'oct' ? w / 3 + ' digits' : w / 8 + (w === 8 ? ' byte' : ' bytes')}</small></button>`).join('');
+  const dName = kind === 'hex' ? 'hex' : 'octal';
+  const intro = C.base ? `Tap a bit to turn it on or off. Every group of ${C.group} bits is one ${dName} digit, shown underneath.` : 'Tap a bit to turn it on or off and watch the number change. Choose more bits to go past 255.';
+  return `<div class="cs-flip" data-kind="${kind}" data-w="${C.widths[0]}" data-v="0">
+    <h6>\uD83D\uDD79\uFE0F Flip the bits</h6>
+    <p class="cs-conv-intro">${intro}</p>
+    <div class="cs-bases cs-fwidths" role="group" aria-label="How many bits">${chips}</div>
+    <div class="cs-fgrid">${csFlipGrid(kind, C.widths[0])}</div>
+    <div class="cs-bitsum" aria-live="polite">0</div>
+    <div class="cs-bitouts">
+      <div><span>Decimal</span><b data-bo="10">0</b></div><div><span>Octal</span><b data-bo="8">0</b></div><div><span>Hex</span><b data-bo="16">0</b></div><div class="cs-bo-wide"><span>Binary</span><b data-bo="2">0</b></div>
+    </div>
+    <div class="cs-qactions">
+      <button type="button" class="cs-qbtn" onclick="csBitSet(this, 'zero')">Clear</button>
+      <button type="button" class="cs-qbtn" onclick="csBitSet(this, 'ones')">All ones</button>
+      <button type="button" class="cs-qbtn" onclick="csBitSet(this, 'rand')">Random</button>
+      <button type="button" class="cs-qbtn go" onclick="csBitSend(this)">Send to converter \u2191</button>
+    </div>
+  </div>`;
+}
+function csFlipSum(v, w){
+  const on = []; for(let i = w - 1; i >= 0; i--) if((v >> BigInt(i)) & 1n) on.push(1n << BigInt(i));
+  if(!on.length) return '0';
+  if(on.length === 1) return csComma(v);
+  return on.length <= 6 ? `${on.map(csComma).join(' + ')} = ${csComma(v)}` : `${on.length} bits are on = ${csComma(v)}`;
+}
+function csBitPaint(root, v){
+  const w = +root.dataset.w, kind = root.dataset.kind, C = CS_FLIP[kind];
+  root.dataset.v = v.toString();
+  root.querySelectorAll('.cs-bit').forEach(b => {
+    const i = +b.dataset.i, on = ((v >> BigInt(i)) & 1n) === 1n;
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); b.querySelector('b').textContent = on ? '1' : '0';
+    b.setAttribute('aria-label', `Bit ${i}, currently ${on ? 1 : 0}`);
+  });
+  if(C.base){
+    const mask = (1n << BigInt(C.group)) - 1n;
+    root.querySelectorAll('.cs-fdigit').forEach(d => { d.textContent = ((v >> BigInt(+d.dataset.g * C.group)) & mask).toString(C.base).toUpperCase(); });
+  }
+  root.querySelector('.cs-bitsum').textContent = csFlipSum(v, w);
+  const bin = v.toString(2).padStart(w, '0');
+  const set = (b, s) => { const el = root.querySelector(`[data-bo="${b}"]`); if(el) el.textContent = s; };
+  set(10, csComma(v));
+  set(8, v.toString(8).padStart(kind === 'oct' ? w / 3 : 1, '0'));
+  set(16, v.toString(16).toUpperCase().padStart(kind === 'oct' ? 1 : w / 4, '0'));
+  set(2, csGroup(bin, kind === 'oct' ? 3 : 4));
+}
+function csBitFlip(btn){ const root = btn.closest('.cs-flip'); csBitPaint(root, BigInt(root.dataset.v) ^ (1n << BigInt(btn.dataset.i))); }
+function csBitSet(btn, mode){
+  const root = btn.closest('.cs-flip'), w = +root.dataset.w;
+  let v = 0n;
+  if(mode === 'ones') v = (1n << BigInt(w)) - 1n;
+  else if(mode === 'rand'){ let s = ''; for(let i = 0; i < w; i++) s += Math.random() < 0.5 ? '0' : '1'; v = BigInt('0b' + s); }
+  csBitPaint(root, v);
+}
+function csFlipWidth(btn){
+  const root = btn.closest('.cs-flip'), w = +btn.dataset.w, kind = root.dataset.kind;
+  root.querySelectorAll('.cs-fwidths .cs-base').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  root.dataset.w = w;
+  root.querySelector('.cs-fgrid').innerHTML = csFlipGrid(kind, w);
+  csBitPaint(root, BigInt(root.dataset.v) & ((1n << BigInt(w)) - 1n));
+}
+function csBitSend(btn){
+  const flip = btn.closest('.cs-flip'), conv = flip.closest('.cs-pane').querySelector('.cs-conv'), inp = conv.querySelector('.cs-conv-in');
+  conv.dataset.base = 2; inp.value = BigInt(flip.dataset.v).toString(2).padStart(+flip.dataset.w, '0');
+  conv.querySelectorAll('.cs-base').forEach(b => { const on = +b.dataset.base === 2; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  csConvRun(conv);
+  try{ conv.scrollIntoView({ block:'nearest', behavior: skReducedMotion() ? 'auto' : 'smooth' }); }catch(_){}
+}
+
+/* ----- Whole cheat sheet ----- */
+function renderCheat(topic){
+  const kind = topic.lesson.ref;
+  const item = CONV_GROUPS.flatMap(g => g.items).find(x => topic.key === x.k || topic.key.endsWith('-' + x.k));
+  const opKey = (topic.key.split('-')[0]), op = ARITH[opKey] ? opKey : null;
+  const title = kind === 'place' ? 'Place values of a binary number' : kind === 'oct' ? 'Octal: digits and place values' : 'Hexadecimal: digits and place values';
+  const tabs = [
+    { id:'explore', icon:'\uD83D\uDD0D', label:'Explore' },
+    ...(op ? [{ id:'op', icon:ARITH[op].sym, label:ARITH[op].name }] : []),
+    { id:'examples', icon:'\uD83D\uDCDD', label:'More examples' },
+    { id:'quiz', icon:'\uD83C\uDFAF', label:'Practice' },
+    { id:'facts', icon:'\uD83D\uDCDA', label:'Quick facts' },
+    { id:'conv', icon:'\uD83E\uDDEE', label:'Converter' }
+  ];
+  const tabBtns = tabs.map((t, i) => `<button type="button" role="tab" class="cs-tab ${i === 0 ? 'on' : ''}" data-tab="${t.id}" aria-selected="${i === 0}" onclick="csTab(this)"><span aria-hidden="true">${t.icon}</span> ${t.label}</button>`).join('');
+  return `
+    <div class="cheat" data-kind="${kind}">
+      <div class="cs-head"><span class="cs-badge" aria-hidden="true">\uD83D\uDCD2</span><div><div class="game-eyebrow">Cheat sheet</div><h4 class="cs-title">${title}</h4></div></div>
+      <div class="cs-tabs" role="tablist">${tabBtns}</div>
+      <div class="cs-pane" data-pane="explore" role="tabpanel">${csExploreFrame(kind)}</div>
+      ${op ? `<div class="cs-pane" data-pane="op" role="tabpanel" hidden>${csOpPane(op, item ? item.from : 2)}</div>` : ''}
+      <div class="cs-pane" data-pane="examples" role="tabpanel" hidden>${csExamplesPane(kind)}</div>
+      <div class="cs-pane" data-pane="quiz" role="tabpanel" hidden>${csQuizPane()}</div>
+      <div class="cs-pane" data-pane="facts" role="tabpanel" hidden>${csFactsPane(kind, item)}</div>
+      <div class="cs-pane" data-pane="conv" role="tabpanel" hidden>${csConvPane(item ? item.from : 2, kind)}</div>
+    </div>`;
+}
+function csTab(btn){
+  const root = btn.closest('.cheat');
+  root.querySelectorAll('.cs-tab').forEach(t => { const on = t === btn; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
+  root.querySelectorAll('.cs-pane').forEach(p => { p.hidden = p.dataset.pane !== btn.dataset.tab; });
+  if(btn.dataset.tab === 'conv') csConvRun(root.querySelector('.cs-conv'));
+  if(btn.dataset.tab === 'quiz'){ const qz = root.querySelector('.cs-quiz'); if(qz && qz.dataset.ready !== '1') csQuizNew(qz); }
+}
+
+function renderLesson(topic){
+  const L = topic.lesson;
+  const steps = L.steps.map((t, i) => `<li><span class="ls-num">${i + 1}</span><span>${escapeHtml(t)}</span></li>`).join('');
+  const lines = L.exLines.map(t => `<div class="ex-line">${escapeHtml(t)}</div>`).join('');
+  return `
+    <div class="lesson-card">
+      <div class="lesson-head">
+        <span class="lesson-badge">📘</span>
+        <div>
+          <div class="game-eyebrow">Quick lesson</div>
+          <h3 class="game-title">${escapeHtml(L.title)}</h3>
+        </div>
+      </div>
+      <div class="lesson-idea">${escapeHtml(L.idea)}</div>
+      <div class="lesson-cols">
+        <div class="lesson-panel">
+          <h5>Steps</h5>
+          <ol class="ls-steps">${steps}</ol>
+        </div>
+        <div class="lesson-panel lesson-example">
+          <h5>${escapeHtml(L.exTitle)}</h5>
+          ${lines}
+          <div class="ex-answer">✅ ${escapeHtml(L.exAnswer)}</div>
+        </div>
+      </div>
+      ${renderCheat(topic)}
+      <div class="lesson-tip"><span>💡</span><p>${escapeHtml(L.tip)}</p></div>
+    </div>`;
+}
+
+/* ================= ACTIVITY LOG + ADMIN DASHBOARD ================= */
+// Student-supplied text (names) is shown in the admin table, so it must be escaped.
+function escapeHtml(value){
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]
+  ));
+}
+
+// Records something a signed-in student did, so the admin can see it.
+function logActivity(type, detail, extra){
+  if(!currentUser) return;
+  const userRef = db.collection('users').doc(currentUser.uid);
+  userRef.collection('activity').add(Object.assign({
+    type, detail: detail || '', classSection: classSection || null, at: firebase.firestore.FieldValue.serverTimestamp()
+  }, extra || {})).catch(console.error);
+  userRef.set({lastSeenAt: Date.now()}, {merge:true}).catch(console.error);
+}
+
+// Only REAL activity is recorded: a student checking their first answer in a mini game (and, when a game has
+// difficulty levels, the level they picked). Opening a lesson page or replaying the same section within
+// 10 minutes is not logged again, so the admin board is not flooded with repeats.
+const GAME_LOG_COOLDOWN_MS = 10 * 60 * 1000;
+const recentGameLogs = {};
+function logGamePlay(section, levelKey){
+  if(!currentUser) return;
+  const key = currentUser.uid + '|' + section + '|' + (levelKey || 'all');
+  const now = Date.now();
+  if(recentGameLogs[key] && now - recentGameLogs[key] < GAME_LOG_COOLDOWN_MS) return;
+  recentGameLogs[key] = now;
+  const levelLabel = levelKey ? ((typeof GAME_LEVELS !== 'undefined' && GAME_LEVELS[levelKey]) ? GAME_LEVELS[levelKey].label : levelKey) : '';
+  logActivity('game_played', levelLabel ? `${section} \u00B7 ${levelLabel}` : section, { section, level: levelKey || 'all' });
+}
+
+// Shows/hides the Admin tab. This only controls what's VISIBLE — the real protection
+// is the Firestore security rules, which stop anyone else from reading other students' data.
+function updateAdminAccess(email){
+  const isAdmin = !!email && email === ADMIN_EMAIL;
+  document.getElementById('adminNavBtn').style.display = isAdmin ? 'inline-flex' : 'none';
+  document.getElementById('adminBottomNavBtn').style.display = isAdmin ? 'flex' : 'none';
+  if(!isAdmin && document.getElementById('page-admin').classList.contains('active')) goToPage('home');
+}
+
+function formatWhen(ms){
+  if(!ms) return '—';
+  return new Date(ms).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+}
+
+function describeActivity(a){
+  if(a.type === 'game_played') return `played <b>${escapeHtml(a.detail || 'a mini game')}</b>`;
+  if(a.type === 'class_selected') return `chose class section <b>${escapeHtml(a.detail)}</b>`;
+  if(a.type === 'topic_opened') return `opened the ${escapeHtml(a.detail)} lesson`;
+  return escapeHtml(a.type || 'did something');
+}
+
+// ----- Admin: students grouped by class section (ICT - A, ICT - B) -----
+const ADMIN_NONE = '__none';
+let adminStudents = [], adminFilter = 'all';
+
+// Which admin group a student belongs to. Anyone without a valid class section is "No section yet".
+function adminKey(s){ return CLASS_SECTIONS.indexOf(s.classSection) >= 0 ? s.classSection : ADMIN_NONE; }
+function adminInSection(key){ return key === 'all' ? adminStudents : adminStudents.filter(s => adminKey(s) === key); }
+function adminLabel(key){ return key === 'all' ? 'All students' : key === ADMIN_NONE ? 'No section yet' : key; }
+
+function setAdminSection(key){ adminFilter = key; renderAdmin(); }
+
+function toggleAdminStudent(id){
+  const row = document.querySelector(`tr.adm-row[data-id="${CSS.escape(id)}"]`), det = document.querySelector(`tr.adm-detail[data-for="${CSS.escape(id)}"]`);
+  if(!row || !det) return;
+  const open = det.hidden;
+  det.hidden = !open; row.classList.toggle('open', open); row.setAttribute('aria-expanded', open);
+}
+
+function renderAdmin(){
+  const now = Date.now(), dayAgo = now - 24*60*60*1000, weekAgo = now - 7*24*60*60*1000;
+  if(adminFilter === ADMIN_NONE && !adminInSection(ADMIN_NONE).length) adminFilter = 'all';
+
+  // section cards (All, ICT - A, ICT - B, and "No section yet" when somebody has not picked)
+  const cards = [{ key:'all', icon:'\uD83D\uDC65' }, ...CLASS_SECTIONS.map(s => ({ key:s, icon:'\uD83C\uDFEB' }))];
+  if(adminInSection(ADMIN_NONE).length) cards.push({ key:ADMIN_NONE, icon:'\u2754' });
+  document.getElementById('adminSections').innerHTML = cards.map(c => {
+    const list = adminInSection(c.key), act = list.filter(s => s.lastActive > dayAgo).length, on = c.key === adminFilter;
+    return `<button type="button" class="adm-sec ${on ? 'on' : ''}" data-key="${escapeHtml(c.key)}" aria-pressed="${on}" onclick="setAdminSection(this.dataset.key)">
+      <span class="adm-sec-ico" aria-hidden="true">${c.icon}</span>
+      <span class="adm-sec-body"><b>${escapeHtml(adminLabel(c.key))}</b><span>${list.length} student${list.length === 1 ? '' : 's'} \u00B7 ${act} active today</span></span>
+    </button>`;
+  }).join('');
+
+  const list = adminInSection(adminFilter), title = adminFilter === 'all' ? '' : ` \u00B7 ${adminLabel(adminFilter)}`;
+  document.getElementById('adminStudentCount').textContent = `${adminStudents.length} student${adminStudents.length === 1 ? '' : 's'} in total`;
+  document.getElementById('adminTotalStudents').textContent = list.length;
+  document.getElementById('adminActiveToday').textContent = list.filter(s => s.lastActive > dayAgo).length;
+  document.getElementById('adminActiveWeek').textContent = list.filter(s => s.lastActive > weekAgo).length;
+  document.getElementById('adminGamesPlayed').textContent = list.reduce((n, s) => n + s.games, 0);
+  document.getElementById('adminStudentsTitle').textContent = `Students${title}`;
+  document.getElementById('adminFeedTitle').textContent = `Recent activity${title}`;
+
+  const showSec = adminFilter === 'all';
+  document.getElementById('adminStudentRows').innerHTML = list.length
+    ? list.map(s => {
+        const events = s.activity.slice(0, 15).map(a => `<div class="adm-ev"><span class="adm-ev-t">${formatWhen(a.ms)}</span><span>${describeActivity(a)}</span></div>`).join('');
+        const id = escapeHtml(s.id);
+        return `<tr class="adm-row" data-id="${id}" tabindex="0" role="button" aria-expanded="false" title="Click to see recent activity" onclick="toggleAdminStudent(this.dataset.id)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAdminStudent(this.dataset.id);}">
+          <td><span class="adm-caret" aria-hidden="true">\u25B8</span> ${escapeHtml(s.name)}</td>
+          <td>${escapeHtml(s.email)}</td>
+          <td>${adminKey(s) === ADMIN_NONE ? '<span class="adm-badge none">Not set</span>' : `<span class="adm-badge">${escapeHtml(s.classSection)}</span>`}</td>
+          <td>${escapeHtml(s.level)}</td>
+          <td>${s.streak} \uD83D\uDD25</td>
+          <td>${s.games}</td>
+          <td>${formatWhen(s.lastActive)}</td>
+        </tr>
+        <tr class="adm-detail" data-for="${id}" hidden><td colspan="7"><div class="adm-events">${events || '<span class="admin-intro" style="margin:0;">No activity recorded yet.</span>'}</div></td></tr>`;
+      }).join('')
+    : `<tr><td colspan="7">${adminFilter === 'all' ? 'No students yet.' : `No students in ${escapeHtml(adminLabel(adminFilter))} yet.`}</td></tr>`;
+
+  // One row per student (name shown once). Only mini-game plays count; repeats are merged into "x2".
+  const feed = list.map(s => {
+    const plays = s.activity.filter(a => a.type === 'game_played').sort((x, y) => y.ms - x.ms);
+    if(!plays.length) return null;
+    const counts = new Map();                       // keeps most-recent-first order
+    plays.forEach(p => { const k = p.detail || 'Mini game'; counts.set(k, (counts.get(k) || 0) + 1); });
+    return { student: s.name, sec: adminKey(s) === ADMIN_NONE ? '' : s.classSection, ms: plays[0].ms, items: [...counts.entries()] };
+  }).filter(Boolean).sort((x, y) => y.ms - x.ms).slice(0, 20);
+
+  document.getElementById('adminActivityList').innerHTML = feed.length
+    ? feed.map(r => `<div class="admin-activity-row">
+        <span class="aa-time">${formatWhen(r.ms)}</span>
+        <span class="aa-body"><strong>${escapeHtml(r.student)}</strong>${showSec && r.sec ? ` <span class="adm-badge">${escapeHtml(r.sec)}</span>` : ''} played
+          ${r.items.map(([label, n]) => `<span class="aa-chip">${escapeHtml(label)}${n > 1 ? ` <b>\u00D7${n}</b>` : ''}</span>`).join('')}
+        </span>
+      </div>`).join('')
+    : `<p class="admin-intro">No activity recorded yet${adminFilter === 'all' ? '' : ` for ${escapeHtml(adminLabel(adminFilter))}`}. It appears when students play the mini game.</p>`;
+}
+
+async function loadAdminDashboard(){
+  if(!currentUser || currentUser.email !== ADMIN_EMAIL) return;
+
+  const loading = document.getElementById('adminLoadingMsg');
+  const table = document.getElementById('adminStudentTable');
+  loading.style.display = 'block';
+  loading.style.color = '';
+  loading.textContent = 'Loading student data...';
+  table.style.display = 'none';
+
+  try{
+    const usersSnap = await db.collection('users').get();
+
+    const students = await Promise.all(usersSnap.docs.map(async doc=>{
+      const u = doc.data();
+      const userRef = db.collection('users').doc(doc.id);
+      const activitySnap = await userRef.collection('activity').orderBy('at', 'desc').limit(40).get();
+
+      const name = u.displayName || u.email || '(no name)';
+      const activity = activitySnap.docs.map(a => { const d = a.data(); return { ...d, ms: (d.at && d.at.toMillis) ? d.at.toMillis() : 0 }; })
+        .sort((x, y) => y.ms - x.ms);
+      return {
+        id: doc.id, name, email: u.email || '', level: u.level || '\u2014', classSection: u.classSection || '',
+        streak: calcStreaks(new Set(Array.isArray(u.activeDays) ? u.activeDays : [])).current,
+        lastActive: u.lastSeenAt || u.lastLoginTimestamp || 0,
+        games: activity.filter(a => a.type === 'game_played').length,
+        activity
+      };
+    }));
+
+    students.sort((a,b)=> b.lastActive - a.lastActive);
+    adminStudents = students;
+    renderAdmin();
+
+    loading.style.display = 'none';
+    table.style.display = 'table';
+  } catch(err){
+    console.error(err);
+    loading.style.color = 'var(--orange-dark)';
+    loading.textContent = `Couldn't load student data (${err.message}). Make sure the admin Firestore rules have been published.`;
+  }
+}
+
+
+/* ================= HOME: WARM-UP CHALLENGE (number system conversions) ================= */
+function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+const WU_DIGITS = '0123456789ABCDEF';
+
+// The six conversion types. Every type has a fixed range of numbers, so the warm-up knows every possible question.
+//   from / to = number bases, lo / hi = the range of decimal values used to build the question.
+const WU_TYPES = [
+  { tag:'Binary \u2192 Decimal',     from:2,  to:10, lo:8,  hi:63  },
+  { tag:'Decimal \u2192 Binary',     from:10, to:2,  lo:8,  hi:63  },
+  { tag:'Binary \u2192 Octal',       from:2,  to:8,  lo:8,  hi:255 },
+  { tag:'Octal \u2192 Binary',       from:8,  to:2,  lo:8,  hi:63  },
+  { tag:'Binary \u2192 Hexadecimal', from:2,  to:16, lo:16, hi:255 },
+  { tag:'Hexadecimal \u2192 Binary', from:16, to:2,  lo:16, hi:255 }
+];
+const WU_BASE_NAME = { 2:'binary', 8:'octal', 10:'decimal', 16:'hex' };
+function wuFmt(n, base){ return n.toString(base).toUpperCase(); }
+// What the student sees: binary numbers are shown in groups of 4 bits (display only, the answer is unchanged).
+function wuShow(n, base){
+  const s = wuFmt(n, base);
+  if(base !== 2) return s;
+  const g = [];
+  for(let i = s.length; i > 0; i -= 4) g.unshift(s.slice(Math.max(0, i - 4), i));
+  return g.join(' ');
+}
+
+// NO-REPEAT SYSTEM (a shuffled "deck", like a deck of cards):
+//  1. Each type owns a shuffled deck of every number in its range. A number is dealt once, then it is gone.
+//  2. The next TYPE comes from a shuffled bag that holds each of the 6 types once, so the types are mixed
+//     evenly and the same type never shows up twice in a row.
+//  3. A deck is only reshuffled after every number in it has been used (and the first card of the new
+//     deck is never the card that was just dealt).
+const wuDecks = [];
+let wuBag = [], wuLastType = -1, wuLastNum = -1, wuCount = 0;
+
+function wuDealNumber(t){
+  const T = WU_TYPES[t];
+  let deck = wuDecks[t];
+  if(!deck || !deck.length){
+    const all = [];
+    for(let n = T.lo; n <= T.hi; n++) all.push(n);
+    deck = shuffleArr(all);
+    if(deck.length > 1 && t === wuLastType && deck[deck.length - 1] === wuLastNum) deck.unshift(deck.pop());
+    wuDecks[t] = deck;
+  }
+  return deck.pop();
+}
+function wuNextType(){
+  if(!wuBag.length){
+    wuBag = shuffleArr(WU_TYPES.map((_, i) => i));
+    if(wuBag[wuBag.length - 1] === wuLastType) wuBag.unshift(wuBag.pop());   // never the same type twice in a row
+  }
+  return wuBag.pop();
+}
+
+// Builds 4 different answer choices: the right one plus 3 look-alikes (one digit changed, or a nearby number).
+function wuChoices(answer, base){
+  const set = new Set([answer]);
+  let guard = 0;
+  while(set.size < 4 && guard++ < 400){
+    let cand;
+    if(base === 10){
+      const n = parseInt(answer, 10) + randInt(1, 9) * (Math.random() < .5 ? -1 : 1);
+      if(n < 1) continue;
+      cand = String(n);
+    } else {
+      const chars = answer.split('');
+      const pos = randInt(0, chars.length - 1);
+      const d = WU_DIGITS[randInt(0, base - 1)];
+      if(d === chars[pos]) continue;
+      if(pos === 0 && d === '0' && chars.length > 1) continue;
+      chars[pos] = d;
+      cand = chars.join('');
+    }
+    set.add(cand);
+  }
+  return Array.from(set);
+}
+
+let wuStreak = 0, wuBest = 0, wuAnswered = false, wuCurrent = null;
+try{ wuBest = parseInt(localStorage.getItem('genWarmupBest') || '0', 10) || 0; }catch(e){}
+
+function newWarmup(){
+  const t = wuNextType();
+  const n = wuDealNumber(t);
+  const T = WU_TYPES[t];
+  wuLastType = t; wuLastNum = n; wuCount++;
+  wuCurrent = { tag:T.tag, answer:wuFmt(n, T.to), base:T.to, type:t, n:n };
+  wuAnswered = false;
+  const list = shuffleArr(wuChoices(wuCurrent.answer, wuCurrent.base));
+
+  document.getElementById('wuTag').textContent = '\uD83D\uDD22 ' + T.tag;
+  document.getElementById('wuQuestion').innerHTML =
+    `<span class="wu-q-part"><b class="wu-num">${escapeHtml(wuShow(n, T.from))}</b><i class="wu-base">${WU_BASE_NAME[T.from]}</i></span>` +
+    `<span class="wu-q-arrow" aria-hidden="true">\u2192</span>` +
+    `<span class="wu-q-part"><b class="wu-num wu-unknown">?</b><i class="wu-base">${WU_BASE_NAME[T.to]}</i></span>`;
+  document.getElementById('wuQuestion').setAttribute('aria-label', `${wuFmt(n, T.from)} in ${WU_BASE_NAME[T.from]} equals what in ${WU_BASE_NAME[T.to]}?`);
+  document.getElementById('wuOptions').innerHTML = list.map(v =>
+    `<button class="wu-opt" data-val="${v}" onclick="answerWarmup(this)">${v}</button>`).join('');
+  const fb = document.getElementById('wuFeedback');
+  fb.textContent = 'Pick an answer!';
+  fb.className = 'wu-feedback';
+  document.getElementById('wuNext').classList.remove('show');
+  document.getElementById('wuStreak').textContent = wuStreak;
+  document.getElementById('wuBest').textContent = wuBest;
+  document.getElementById('wuCount').textContent = wuCount;
+}
+
+function answerWarmup(btn){
+  if(wuAnswered) return;
+  wuAnswered = true;
+  markActiveToday();
+  const right = btn.dataset.val === wuCurrent.answer;
+  const fb = document.getElementById('wuFeedback');
+
+  document.querySelectorAll('#wuOptions .wu-opt').forEach(b=>{
+    b.disabled = true;
+    if(b.dataset.val === wuCurrent.answer) b.classList.add('correct');
+  });
+
+  if(right){
+    wuStreak++;
+    if(wuStreak > wuBest){
+      wuBest = wuStreak;
+      try{ localStorage.setItem('genWarmupBest', String(wuBest)); }catch(e){}
+    }
+    const praise = wuStreak % 5 === 0 ? `\uD83C\uDF89 ${wuStreak} in a row! You're on fire!` : ['Nice one! \u2705','Correct! Keep going \uD83D\uDCAA','Spot on! \u2B50','Great job! \uD83D\uDE80'][randInt(0,3)];
+    fb.textContent = praise;
+    fb.className = 'wu-feedback good';
+    const card = document.getElementById('warmup');
+    card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
+  } else {
+    btn.classList.add('wrong');
+    fb.textContent = `Not quite \u2014 the answer is ${wuCurrent.answer}. Try the next one!`;
+    fb.className = 'wu-feedback bad';
+    wuStreak = 0;
+  }
+  document.getElementById('wuStreak').textContent = wuStreak;
+  document.getElementById('wuBest').textContent = wuBest;
+  document.getElementById('wuNext').classList.add('show');
+}
+
+newWarmup();
+
+
+/* ================= MINI GAME ================= */
+// A topic's `game` can have `levels:true` plus questions tagged level:'easy' | 'medium' | 'hard'.
+// Then the student first picks a difficulty and only gets questions of that level.
+let gameState = null;
+
+const GAME_LEVELS = {
+  easy:   { label:'Easy',   emoji:'🟢', cls:'lv-easy',   desc:'Warm-up questions to get you started' },
+  medium: { label:'Medium', emoji:'🟡', cls:'lv-medium', desc:'A bit trickier. Time to think!' },
+  hard:   { label:'Hard',   emoji:'🔴', cls:'lv-hard',   desc:'Challenge mode for math champions' }
+};
+
+function shuffleArr(a){
+  const r = a.slice();
+  for(let i = r.length - 1; i > 0; i--){ const k = Math.floor(Math.random() * (i + 1)); [r[i], r[k]] = [r[k], r[i]]; }
+  return r;
+}
+// (kept for older question formats)
+function shuffleOptions(q){
+  const correct = q.options[q.answer];
+  const opts = shuffleArr(q.options);
+  return Object.assign({}, q, { options: opts, answer: opts.indexOf(correct) });
+}
+
+const BASE_NAMES = { 2:'Binary', 8:'Octal', 10:'Decimal', 16:'Hexadecimal' };
+function baseLabel(b){ return (BASE_NAMES[b] || 'Base ' + b) + ' \u00B7 base ' + b; }
+
+// Shows a binary number in groups of 4 bits (display only) so long numbers are easy to read.
+function convDisplayNum(num, base, isExpr){
+  const text = String(num);
+  if(isExpr || base !== 2) return escapeHtml(text);
+  const groups = [];
+  for(let i = text.length; i > 0; i -= 4) groups.unshift(text.slice(Math.max(0, i - 4), i));
+  return groups.map(g => `<span class="bit-grp">${escapeHtml(g)}</span>`).join('');
+}
+
+function correctAnswer(q){
+  return (typeof q.answer === 'number' && q.options) ? String(q.options[q.answer]) : String(q.answer);
+}
+function normAnswer(v){ return String(v).replace(/[\u2212\u2013\u2014]/g,'-').replace(/[,\s]/g,'').toLowerCase(); }
+
+// Binary / octal / hex answers: ignore spaces, upper/lower case, a 0b / 0o / 0x prefix and leading zeros.
+function normBase(v, base){
+  let s = String(v).replace(/[\s_,]/g, '').toLowerCase();
+  if(base === 2) s = s.replace(/^0b/, '');
+  else if(base === 8) s = s.replace(/^0o/, '');
+  else if(base === 16) s = s.replace(/^0x/, '');
+  return s.replace(/^0+(?=.)/, '');
+}
+const BASE_DIGITS = { 2:/^[01]+$/, 8:/^[0-7]+$/, 10:/^[0-9]+$/, 16:/^[0-9a-f]+$/ };
+const BASE_DIGIT_MSG = {
+  2:'Binary answers use only the digits 0 and 1.',
+  8:'Octal answers use only the digits 0 to 7.',
+  10:'Decimal answers use only the digits 0 to 9.',
+  16:'Hex answers use only 0 to 9 and the letters A to F.'
+};
+function answerShapeError(v, q){
+  const base = q && q.base;
+  if(!base || !BASE_DIGITS[base]) return '';
+  return BASE_DIGITS[base].test(normBase(v, base)) ? '' : BASE_DIGIT_MSG[base];
+}
+function answersMatch(a, b, q){
+  const base = q && q.base;
+  if(base === 2 || base === 8 || base === 16) return normBase(a, base) === normBase(b, base);
+  const x = normAnswer(a), y = normAnswer(b);
+  if(x !== '' && !isNaN(Number(x)) && !isNaN(Number(y))) return Number(x) === Number(y);
+  return x === y;
+}
+function gameType(v){ if(gameState) gameState.typed = v; }
+function gameFocusInput(){
+  const inp = document.querySelector('#gameMount .game-input:not(:disabled)');
+  if(inp) inp.focus({preventScroll:true});
+}
+
+// Personal best score for each game, kept in this browser.
+function gameBestKey(s){ return 'genBest_' + s.topic.key + (s.level ? '_' + s.level : ''); }
+function gameLoadBest(s){ try{ return parseInt(localStorage.getItem(gameBestKey(s)) || '0', 10) || 0; }catch(e){ return 0; } }
+function gameSaveBest(s){ try{ localStorage.setItem(gameBestKey(s), String(s.best)); }catch(e){} }
+
+function gameInit(topic){
+  const g = topic.game || {};
+  const bank = g.questions || [];
+  const useLevels = !!g.levels && bank.some(q => q.level);
+  gameState = {
+    topic, bank, useLevels, level:null,
+    questions: useLevels ? [] : bank,
+    cta: g.cta || `Think you've mastered ${topic.title}? Take the challenge, beat your best score, and tap Show solution whenever you're stuck!`,
+    idx:0, score:0, typed:'', checked:false, showSol:false, fb:'', fbClass:'',
+    logged:false, best:0, bestDone:false, newBest:false, results:[]
+  };
+  gameState.best = gameLoadBest(gameState);
+  renderGame();
+}
+
+function gameStartLevel(level){
+  const s = gameState; if(!s) return;
+  s.level = level;
+  logGamePlay(s.topic.title, level);
+  s.questions = shuffleArr(s.bank.filter(q => q.level === level));
+  s.idx = 0; s.score = 0; s.results = []; s.typed = ''; s.checked = false; s.showSol = false; s.fb = ''; s.fbClass = '';
+  s.best = gameLoadBest(s); s.bestDone = false; s.newBest = false;
+  renderGame();
+  gameFocusInput();
+}
+
+function gameBackToLevels(){
+  const s = gameState; if(!s) return;
+  s.level = null; s.questions = [];
+  s.idx = 0; s.score = 0; s.results = []; s.typed = ''; s.checked = false; s.showSol = false; s.fb = ''; s.fbClass = '';
+  renderGame();
+}
+
+function renderGame(){
+  const s = gameState, mount = document.getElementById('gameMount');
+  if(!s || !mount) return;
+
+  const picking = s.useLevels && !s.level;
+  const total = s.questions.length;
+  const q = s.questions[s.idx];
+  const preview = !picking && !q && total === 0;
+  const finished = !picking && total > 0 && s.idx >= total;
+  const pct = total ? Math.round(Math.min(s.idx, total) / total * 100) : 0;
+  const lv = s.level ? GAME_LEVELS[s.level] : null;
+  const qlv = (q && q.level && GAME_LEVELS[q.level]) ? GAME_LEVELS[q.level] : lv;
+
+  // Save a new personal best once, the moment the game is finished.
+  if(finished && !s.bestDone){
+    s.bestDone = true;
+    s.newBest = s.score > s.best;
+    if(s.newBest){ s.best = s.score; gameSaveBest(s); }
+  }
+
+  let body;
+  if(picking){
+    const cards = Object.keys(GAME_LEVELS).map(key => {
+      const L = GAME_LEVELS[key];
+      const n = s.bank.filter(x => x.level === key).length;
+      return `
+        <button class="game-level-card ${L.cls}" onclick="gameStartLevel('${key}')" ${n ? '' : 'disabled'}>
+          <span class="gl-emoji">${L.emoji}</span>
+          <span class="gl-name">${L.label}</span>
+          <span class="gl-desc">${L.desc}</span>
+          <span class="gl-count">${n} question${n === 1 ? '' : 's'}</span>
+          <span class="gl-go">Play →</span>
+        </button>`;
+    }).join('');
+    body = `
+      <div class="game-levels-title">Choose your difficulty</div>
+      <div class="game-level-grid">${cards}</div>`;
+  } else if(finished){
+    const p = total ? Math.round(s.score / total * 100) : 0;
+    const emoji = p === 100 ? '🏆' : p >= 80 ? '🎉' : p >= 50 ? '👏' : '💪';
+    const msg = p === 100 ? 'Perfect score! You are a number-system master.'
+              : p >= 80 ? 'Awesome work! Only a few more to master.'
+              : p >= 50 ? 'Good effort! Re-read the quick lesson and try again.'
+              : 'Keep practicing! Read the quick lesson above, then give it another go.';
+    body = `
+      <div class="game-finish">
+        <div class="gf-emoji">${emoji}</div>
+        <h4>${lv ? lv.label + ' level' : 'Challenge'} complete!</h4>
+        <p>You scored <b>${s.score}</b> out of <b>${total}</b> (${p}%).</p>
+        <p class="gf-msg">${msg}</p>
+        ${s.newBest ? '<div class="gf-best">🌟 New personal best!</div>' : ''}
+        <div class="game-actions">
+          <button class="game-btn primary" onclick="${s.useLevels ? `gameStartLevel('${s.level}')` : 'gameRestart()'}">↺ Play again</button>
+          ${s.useLevels ? `<button class="game-btn ghost" onclick="gameBackToLevels()">Change level</button>` : ''}
+        </div>
+      </div>`;
+  } else {
+    const isHex = !!(q && q.to === 16);
+    const inCls = 'game-input' + (isHex ? ' hex' : '') + (s.checked ? (s.fbClass === 'good' ? ' correct' : ' wrong') : '');
+    const inMode = (q && q.to && q.to !== 16) ? 'numeric' : 'text';
+
+    const steps = (q && q.solution && q.solution.length ? q.solution : [null,null,null]).map((t,i)=>`
+        <li><span class="gs-num">${i+1}</span><span class="${t===null?'placeholder':''}">${t===null ? 'Step ' + (i+1) + ' of the solution will appear here.' : escapeHtml(t)}</span></li>`).join('');
+
+    const conv = (q && q.num) ? `
+        <div class="conv-row">
+          <div class="conv-box from"><b class="conv-num${q.expr ? ' expr' : ''}">${convDisplayNum(q.num, q.from, q.expr)}</b><span class="conv-sub">${baseLabel(q.from)}</span></div>
+          <span class="conv-arrow" aria-hidden="true">→</span>
+          <div class="conv-box to"><b class="conv-num">?</b><span class="conv-sub">${baseLabel(q.to)}</span></div>
+        </div>` : '';
+
+    body = `
+      <div class="game-progress"><div class="game-progress-fill" style="width:${pct}%"></div></div>
+      <div class="game-pips" role="img" aria-label="Question ${Math.min(s.idx+1, Math.max(total,1))} of ${total}">${Array.from({length:total}, (_, i) => `<span class="pip ${s.results && s.results[i] === true ? 'ok' : s.results && s.results[i] === false ? 'no' : ''} ${i === s.idx ? 'now' : ''}"></span>`).join('')}</div>
+      <div class="game-q-card">
+        <span class="game-q-label">${qlv ? qlv.emoji + ' ' + qlv.label + ' · ' : ''}Question ${Math.min(s.idx+1, Math.max(total,1))} of ${total || '–'}</span>
+        <div class="game-q-text ${q?'':'placeholder'}">${q ? escapeHtml(q.q) : 'Your question will appear here'}</div>
+        ${conv}
+      </div>
+      <div class="game-answer">
+        <label class="game-answer-label" for="gameInput">${q && q.to ? 'Your answer in ' + (BASE_NAMES[q.to] || 'base ' + q.to).toLowerCase() : 'Your answer'}</label>
+        <input id="gameInput" class="${inCls}" type="text" inputmode="${inMode}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+               placeholder="${q ? 'Type your answer here' : 'Your answer goes here'}" value="${escapeHtml(s.typed || '')}"
+               ${s.checked || !q ? 'disabled' : ''}
+               oninput="gameType(this.value)" onkeydown="if(event.key==='Enter'){ ${s.checked ? 'gameNext()' : 'gameCheck()'}; }">
+      </div>
+      <div class="game-feedback ${s.fbClass||''}">${s.fb || (preview ? 'This is a preview of the game. Questions are coming soon!' : 'Type your answer, then press Check.')}</div>
+      <div class="game-actions">
+        <button class="game-btn primary" onclick="gameCheck()">✓ Check answer</button>
+        <button class="game-btn ghost" onclick="gameToggleSolution()">💡 ${s.showSol ? 'Hide solution' : 'Show solution'}</button>
+        <button class="game-btn next ${s.checked && !preview ? 'show' : ''}" onclick="gameNext()">${s.idx + 1 >= total ? 'Finish ✓' : 'Next →'}</button>
+      </div>
+      <div class="game-solution ${s.showSol ? 'open' : ''}">
+        <div class="gs-head">💡 How to solve it</div>
+        <ol class="gs-steps">${steps}</ol>
+        <div class="gs-answer"><span>Final answer</span><b class="${q?'':'placeholder'}">${q ? escapeHtml(correctAnswer(q)) : '—'}</b></div>
+      </div>`;
+  }
+
+  const stats = picking ? '' : `
+        <div class="game-stats">
+          ${lv ? `<span class="game-pill ${lv.cls}">${lv.emoji} ${lv.label}</span>` : ''}
+          <span class="game-pill">⭐ Score <b>${s.score}</b></span>
+          <span class="game-pill">🏆 Best <b>${s.best}</b></span>
+          <span class="game-pill">🎯 <b>${Math.min(s.idx+1, Math.max(total,1))}</b> / ${total || '–'}</span>
+          ${s.useLevels ? `<button class="game-pill game-pill-btn" onclick="gameBackToLevels()">↩ Change level</button>` : ''}
+        </div>`;
+
+  mount.innerHTML = `
+    <div class="game-card">
+      <div class="game-head">
+        <div class="game-title-wrap">
+          <span class="game-badge">🎮</span>
+          <div>
+            <div class="game-eyebrow">Mini game</div>
+            <h3 class="game-title">${escapeHtml(s.topic.title)} Challenge</h3>
+          </div>
+        </div>${stats}
+      </div>
+      <div class="game-cta"><span>🚀</span><p>${escapeHtml(s.cta)}</p></div>
+      ${body}
+    </div>`;
+}
+
+function gameCheck(){
+  const s = gameState; if(!s || s.checked) return;
+  const q = s.questions[s.idx];
+  if(!q){ s.fb = 'Preview only. Questions are coming soon!'; s.fbClass = ''; renderGame(); return; }
+  if(!String(s.typed || '').trim()){ s.fb = 'Type your answer first!'; s.fbClass = 'bad'; renderGame(); gameFocusInput(); return; }
+  const shapeErr = answerShapeError(s.typed, q);
+  if(shapeErr){ s.fb = shapeErr + ' Fix it and press Check again.'; s.fbClass = 'bad'; renderGame(); gameFocusInput(); return; }
+  s.checked = true;
+  markActiveToday();
+  if(!s.useLevels && !s.logged){ s.logged = true; logGamePlay(s.topic.title, null); }
+  const ok = answersMatch(s.typed, correctAnswer(q), q);
+  s.results[s.idx] = ok;
+  if(ok){ s.score++; s.fb = 'Correct! Great job! ⭐'; s.fbClass = 'good'; }
+  else { s.fb = 'Not quite. Press Show solution to see how it works.'; s.fbClass = 'bad'; }
+  renderGame();
+}
+
+function gameToggleSolution(){
+  if(!gameState) return;
+  gameState.showSol = !gameState.showSol;
+  renderGame();
+}
+
+function gameNext(){
+  const s = gameState; if(!s || !s.checked) return;
+  s.idx++; s.typed = ''; s.checked = false; s.showSol = false; s.fb = ''; s.fbClass = '';
+  renderGame();
+  gameFocusInput();
+  if(s.idx < s.questions.length) window.scrollTo({ top: Math.max(0, document.getElementById('gameMount').getBoundingClientRect().top + window.scrollY - 90), behavior:'smooth' });
+}
+
+function gameRestart(){ gameInit(gameState.topic); }
+
+
+/* ================= STREAK CALENDAR (tracks the days a student practiced) ================= */
+// A day counts as "active" when the student opens the app, a lesson, answers a warm-up question
+// or checks an answer in a mini game. Signed-in students are saved to their account
+// (users/{uid}.activeDays); signed-out visitors are saved in this browser only.
+const ACTIVE_KEY = 'genActiveDays';
+let activeDays = new Set();
+let calView = new Date(); calView.setDate(1);
+
+function dayKey(d){
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function parseDayKey(k){ const p = k.split('-').map(Number); return new Date(p[0], p[1]-1, p[2]); }
+
+function loadLocalDays(){
+  try{ JSON.parse(localStorage.getItem(ACTIVE_KEY) || '[]').forEach(k => activeDays.add(k)); }catch(e){}
+}
+function saveLocalDays(){
+  try{ localStorage.setItem(ACTIVE_KEY, JSON.stringify(Array.from(activeDays))); }catch(e){}
+}
+
+async function loadActiveDaysForUser(uid, data){
+  (Array.isArray(data.activeDays) ? data.activeDays : []).forEach(k => activeDays.add(k));
+  renderStreakCalendar();
+  try{
+    // also count days from the student's earlier activity log
+    const snap = await db.collection('users').doc(uid).collection('activity').orderBy('at','desc').limit(500).get();
+    snap.forEach(doc => { const a = doc.data(); if(a.at && a.at.toDate) activeDays.add(dayKey(a.at.toDate())); });
+  }catch(e){ console.warn('Could not read activity history', e); }
+  renderStreakCalendar();
+  db.collection('users').doc(uid).set({ streak: calcStreaks().current }, {merge:true}).catch(console.error);
+}
+
+function markActiveToday(){
+  const key = dayKey(new Date());
+  if(activeDays.has(key)) return;
+  activeDays.add(key);
+  if(currentUser){
+    db.collection('users').doc(currentUser.uid)
+      .set({ activeDays: firebase.firestore.FieldValue.arrayUnion(key), streak: calcStreaks().current }, {merge:true}).catch(console.error);
+  } else {
+    saveLocalDays();
+  }
+  renderStreakCalendar();
+}
+
+function calcStreaks(days = activeDays){
+  const has = d => days.has(dayKey(d));
+  const d = new Date(); d.setHours(0,0,0,0);
+  let current = 0;
+  if(!has(d)) d.setDate(d.getDate() - 1);          // today isn't over yet: yesterday keeps the streak alive
+  while(has(d)){ current++; d.setDate(d.getDate() - 1); }
+
+  let best = 0, run = 0, prev = null;
+  Array.from(days).map(parseDayKey).sort((a,b) => a - b).forEach(dt => {
+    run = (prev && Math.round((dt - prev) / 86400000) === 1) ? run + 1 : 1;
+    if(run > best) best = run;
+    prev = dt;
+  });
+  return { current, best };
+}
+
+function calPrev(){ calView.setMonth(calView.getMonth() - 1); renderStreakCalendar(); }
+function calNext(){ calView.setMonth(calView.getMonth() + 1); renderStreakCalendar(); }
+
+function renderStreakCalendar(){
+  const el = document.getElementById('streakCalendar');
+  if(!el) return;
+  const y = calView.getFullYear(), m = calView.getMonth();
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const startDay = new Date(y, m, 1).getDay();
+  const todayKey = dayKey(new Date());
+  const { current, best } = calcStreaks();
+  if(currentUser){ const st = document.getElementById('statStreak'); if(st) st.textContent = current; }
+  const now = new Date();
+  const atCurrentMonth = y === now.getFullYear() && m === now.getMonth();
+
+  let cells = '', monthActive = 0;
+  for(let i = 0; i < startDay; i++) cells += '<span class="sc-cell empty"></span>';
+  for(let d = 1; d <= daysInMonth; d++){
+    const k = dayKey(new Date(y, m, d));
+    const active = activeDays.has(k);
+    if(active) monthActive++;
+    const cls = ['sc-cell', active ? 'active' : '', k === todayKey ? 'today' : '', k > todayKey ? 'future' : ''].join(' ');
+    cells += `<span class="${cls}" title="${k}${active ? ' - active' : ''}"><b>${d}</b>${active ? '<i>🔥</i>' : ''}</span>`;
+  }
+
+  const todayDone = activeDays.has(todayKey);
+  const msg = todayDone ? '🎉 You showed up today! Come back tomorrow to keep your streak going.'
+            : current > 0 ? `🔥 Open the app today to keep your ${current}-day streak alive!`
+            : 'Use the app every day to build your streak!';
+
+  el.innerHTML = `
+    <div class="sc-stats">
+      <div class="sc-stat"><span class="sc-num">${current}</span><span class="sc-label">🔥 Current streak</span></div>
+      <div class="sc-stat"><span class="sc-num">${best}</span><span class="sc-label">🏆 Longest streak</span></div>
+      <div class="sc-stat"><span class="sc-num">${monthActive}</span><span class="sc-label">📅 Active this month</span></div>
+    </div>
+    <div class="sc-month">
+      <button class="sc-nav" onclick="calPrev()" aria-label="Previous month">‹</button>
+      <span>${calView.toLocaleString('en-US', { month:'long', year:'numeric' })}</span>
+      <button class="sc-nav" onclick="calNext()" aria-label="Next month" ${atCurrentMonth ? 'disabled' : ''}>›</button>
+    </div>
+    <div class="sc-week">${['S','M','T','W','T','F','S'].map(w => `<span>${w}</span>`).join('')}</div>
+    <div class="sc-grid">${cells}</div>
+    <div class="sc-legend"><span><i class="lg lg-active"></i> Active day</span><span><i class="lg lg-today"></i> Today</span></div>
+    <div class="sc-msg ${todayDone ? 'done' : ''}">${msg}</div>
+    ${currentUser ? '' : '<div class="sc-note">Sign in to save your streak to your account.</div>'}`;
+}
+
+loadLocalDays();
+renderStreakCalendar();
+
+
+/* ================= SKETCHPAD (scratch space on every lesson page) ================= */
+// Each topic (Binary to Decimal, Decimal to Binary, and so on) gets its own sketchpad under the mini game.
+// Drawings are kept per topic while the page is open, so switching topics and coming back keeps your work.
+const SKETCH_COLORS = [
+  {name:'Ink',    val:'#1E3A3A'},
+  {name:'Teal',   val:'#3D8A8A'},
+  {name:'Orange', val:'#E8873A'},
+  {name:'Red',    val:'#E5584F'},
+  {name:'Blue',   val:'#2E86DE'},
+  {name:'Purple', val:'#7C5CD6'},
+  {name:'Green',  val:'#5B8C3E'}
+];
+const sketchPrefs = { tool:'pen', color:'#1E3A3A', size:4, bg:'grid' };
+const sketchStore = {};      // topic key -> { strokes:[], redo:[], w, h }
+let sketch = null;           // the sketchpad that is currently on screen
+
+function skMid(a, b){ return { x:(a.x + b.x) / 2, y:(a.y + b.y) / 2 }; }
+
+function sketchInit(topic){
+  const mount = document.getElementById('sketchMount');
+  if(sketch && sketch.ro) sketch.ro.disconnect();
+  sketchResetMax();               // drop any leftover full-screen overlay from a previous lesson
+  sketch = null;
+  if(!mount) return;
+
+  const entry = sketchStore[topic.key] || (sketchStore[topic.key] = { strokes:[], redo:[], w:0, h:0 });
+  if(!entry.view) entry.view = { z:1, x:0, y:0 };      // zoom level and pan, remembered for this topic
+
+  const colorBtns = SKETCH_COLORS.map(c =>
+    `<button class="sk-color" data-color="${c.val}" style="background:${c.val};" title="${c.name}" aria-label="${c.name} pen" onclick="sketchSetColor('${c.val}')"></button>`).join('');
+
+  mount.innerHTML = `
+    <div class="game-card sketch-card">
+      <div class="game-head">
+        <div class="game-title-wrap">
+          <span class="game-badge">✏️</span>
+          <div>
+            <div class="game-eyebrow">Scratch space</div>
+            <h3 class="game-title">${escapeHtml(topic.title)} Sketchpad</h3>
+          </div>
+        </div>
+        <button type="button" class="sk-btn sk-max-btn" id="skMaxBtn" onclick="sketchToggleMax()" aria-label="Maximize sketchpad" aria-pressed="false">
+          <svg class="sk-max-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="sk-ico-max" d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/><path class="sk-ico-min" d="M20 10h-6V4M4 14h6v6M14 10l7-7M10 14l-7 7"/></svg>
+          <span id="skMaxTxt">Maximize</span>
+        </button>
+      </div>
+      <div class="game-cta"><span>🧮</span><p>Work out your ${escapeHtml(topic.title.toLowerCase())} problems here: write the numbers, draw groups, or try a method. Use a finger, pen or mouse. Pinch with two fingers to zoom and move around.</p></div>
+
+      <div class="sk-toolbar">
+        <div class="sk-group">
+          <button class="sk-btn" data-tool="pen" onclick="sketchSetTool('pen')">✏️ Pen</button>
+          <button class="sk-btn" data-tool="eraser" onclick="sketchSetTool('eraser')">🧽 Eraser</button>
+          <button class="sk-btn" data-tool="hand" onclick="sketchSetTool('hand')" title="Drag to move around the page">✋ Move</button>
+        </div>
+        <div class="sk-group" role="group" aria-label="Pen colors">${colorBtns}</div>
+        <label class="sk-size">Size <input type="range" id="skSize" min="2" max="24" step="1" value="${sketchPrefs.size}" oninput="sketchSetSize(this.value)"><b id="skSizeVal">${sketchPrefs.size}</b></label>
+      </div>
+
+      <div class="sk-wrap sk-bg-${sketchPrefs.bg}" id="skWrap">
+        <canvas class="sk-canvas" id="skCanvas" tabindex="0" aria-label="Sketchpad drawing area. Pinch with two fingers to zoom, or use the zoom buttons."></canvas>
+        <div class="sk-zoom" role="group" aria-label="Zoom">
+          <button type="button" class="sk-zbtn" onclick="sketchZoomBy(0.8)" aria-label="Zoom out">−</button>
+          <button type="button" class="sk-zbtn sk-zval" id="skZoomVal" onclick="sketchZoomReset()" title="Back to 100%" aria-label="Reset zoom">100%</button>
+          <button type="button" class="sk-zbtn" onclick="sketchZoomBy(1.25)" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+
+      <div class="sk-toolbar sk-toolbar-bottom">
+        <div class="sk-group">
+          <button class="sk-btn" id="skUndo" onclick="sketchUndo()">↶ Undo</button>
+          <button class="sk-btn" id="skRedo" onclick="sketchRedo()">↷ Redo</button>
+          <button class="sk-btn" id="skClear" onclick="sketchClear()">🗑 Clear</button>
+        </div>
+        <div class="sk-group">
+          <button class="sk-btn" data-bg="grid" onclick="sketchSetBg('grid')">Grid</button>
+          <button class="sk-btn" data-bg="lines" onclick="sketchSetBg('lines')">Lines</button>
+          <button class="sk-btn" data-bg="plain" onclick="sketchSetBg('plain')">Plain</button>
+        </div>
+      </div>
+    </div>`;
+
+  const cv = document.getElementById('skCanvas');
+  sketch = { topic, entry, canvas:cv, ctx:cv.getContext('2d'), dpr:1, k:1, max:false, busy:false, ph:null, bd:null, cur:null, pid:null, ro:null, ptrs:new Map(), g:null, pan:null, lock:false, space:false, raf:0 };
+  sketchBindCanvas();
+
+  // The lesson page is hidden until everything is built, so size the canvas whenever it actually becomes visible.
+  if(window.ResizeObserver){
+    sketch.ro = new ResizeObserver(() => sketchFit());
+    sketch.ro.observe(cv);
+  }
+  sketchFit();
+  sketchSyncUI();
+}
+
+// Matches the canvas' pixel size to its on-screen size (sharp on retina screens) and redraws the saved strokes.
+function sketchFit(){
+  const s = sketch; if(!s) return;
+  const w = s.canvas.clientWidth, h = s.canvas.clientHeight;
+  if(!w || !h) return;                       // still hidden
+  const e = s.entry;
+  if(s.max){
+    // Maximized = a zoom: the drawing keeps its shape and simply scales with the width.
+    s.k = e.w ? w / e.w : 1;
+  } else {
+    s.k = 1;
+    if(e.w && e.h && (e.w !== w || e.h !== h)){   // window resized or phone rotated: scale the drawing with it
+      const kx = w / e.w, ky = h / e.h;
+      e.strokes.concat(e.redo).forEach(st => { if(st.pts) st.pts.forEach(p => { p.x *= kx; p.y *= ky; }); });
+      if(e.view){ e.view.x *= kx; e.view.y *= ky; }
+    }
+    e.w = w; e.h = h;
+  }
+  s.dpr = window.devicePixelRatio || 1;
+  const pw = Math.round(w * s.dpr), ph = Math.round(h * s.dpr);
+  if(s.canvas.width !== pw || s.canvas.height !== ph){ s.canvas.width = pw; s.canvas.height = ph; }
+  skApplyView();
+  sketchRedraw();
+}
+
+function sketchStyle(ctx, st){
+  ctx.globalCompositeOperation = st.erase ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = st.color; ctx.fillStyle = st.color;
+  ctx.lineWidth = st.size; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+}
+
+function sketchDrawStroke(ctx, st){
+  const p = st.pts; if(!p.length) return;
+  sketchStyle(ctx, st);
+  ctx.beginPath();
+  if(p.length === 1){
+    ctx.arc(p[0].x, p[0].y, st.size / 2, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.moveTo(p[0].x, p[0].y);
+    const m0 = skMid(p[0], p[1]); ctx.lineTo(m0.x, m0.y);
+    for(let i = 1; i < p.length - 1; i++){
+      const m = skMid(p[i], p[i + 1]);
+      ctx.quadraticCurveTo(p[i].x, p[i].y, m.x, m.y);
+    }
+    ctx.lineTo(p[p.length - 1].x, p[p.length - 1].y);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function sketchRedraw(){
+  const s = sketch; if(!s) return;
+  const ctx = s.ctx, sc = s.dpr * s.k, v = s.entry.view;
+  const wipe = () => { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, s.canvas.width, s.canvas.height); ctx.setTransform(sc * v.z, 0, 0, sc * v.z, sc * v.x, sc * v.y); };
+  wipe();
+  s.entry.strokes.forEach(st => { if(st.clear) wipe(); else sketchDrawStroke(ctx, st); });
+}
+
+// Draws just the newest bit of the stroke while the pen is moving (fast and smooth).
+function sketchLiveSegment(final){
+  const s = sketch, st = s.cur, p = st.pts, n = p.length, ctx = s.ctx;
+  const sc = s.dpr * s.k, v = s.entry.view;
+  ctx.setTransform(sc * v.z, 0, 0, sc * v.z, sc * v.x, sc * v.y);
+  sketchStyle(ctx, st);
+  ctx.beginPath();
+  if(n === 1){
+    ctx.arc(p[0].x, p[0].y, st.size / 2, 0, Math.PI * 2); ctx.fill();
+  } else if(n === 2){
+    const m = skMid(p[0], p[1]); ctx.moveTo(p[0].x, p[0].y); ctx.lineTo(m.x, m.y); ctx.stroke();
+  } else {
+    const a = skMid(p[n - 3], p[n - 2]), b = skMid(p[n - 2], p[n - 1]);
+    ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(p[n - 2].x, p[n - 2].y, b.x, b.y); ctx.stroke();
+  }
+  if(final && n >= 2){
+    const m = skMid(p[n - 2], p[n - 1]);
+    ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(p[n - 1].x, p[n - 1].y); ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ---------- Zoom and pan ----------
+   The drawing lives in "page units". entry.view = { z, x, y } says how the page is shown on the canvas:
+   a page point (px, py) appears at  (px * z + x, py * z + y)  in canvas units. Pinching changes z and x/y. */
+const SK_ZMIN = 0.5, SK_ZMAX = 8;
+function skClamp(n, lo, hi){ return Math.min(hi, Math.max(lo, n)); }
+function sketchSetView(x, y, z){
+  const s = sketch; if(!s) return;
+  const k = s.k || 1, W = s.canvas.clientWidth / k, H = s.canvas.clientHeight / k;
+  z = skClamp(z, SK_ZMIN, SK_ZMAX);
+  const v = s.entry.view;
+  v.z = z;
+  v.x = skClamp(x, 60 - W * z, W - 60);      // never let the page slide completely out of sight
+  v.y = skClamp(y, 60 - H * z, H - 60);
+  if(!s.raf) s.raf = requestAnimationFrame(() => { s.raf = 0; skApplyView(); sketchRedraw(); });
+}
+// zoom by a factor around a point (cx, cy in canvas units); default = the middle of the canvas
+function sketchZoomBy(factor, cx, cy){
+  const s = sketch; if(!s) return;
+  const k = s.k || 1, v = s.entry.view;
+  if(cx == null) cx = s.canvas.clientWidth / k / 2;
+  if(cy == null) cy = s.canvas.clientHeight / k / 2;
+  const z = skClamp(v.z * factor, SK_ZMIN, SK_ZMAX);
+  const px = (cx - v.x) / v.z, py = (cy - v.y) / v.z;      // the page point under (cx, cy) stays put
+  sketchSetView(cx - px * z, cy - py * z, Math.abs(z - 1) < 0.03 ? 1 : z);
+}
+function sketchZoomReset(){ sketchSetView(0, 0, 1); }
+// shows the zoom on the grid / lines behind the drawing and on the zoom buttons
+function skApplyView(){
+  const s = sketch; if(!s) return;
+  const v = s.entry.view, k = s.k || 1;
+  const wrap = document.getElementById('skWrap');
+  if(wrap){
+    wrap.style.setProperty('--sk-k', k * v.z);
+    wrap.style.setProperty('--sk-x', (v.x * k) + 'px');
+    wrap.style.setProperty('--sk-y', (v.y * k) + 'px');
+  }
+  const lbl = document.getElementById('skZoomVal');
+  if(lbl){
+    lbl.textContent = Math.round(v.z * 100) + '%';
+    lbl.classList.toggle('is-zoomed', v.z !== 1 || v.x !== 0 || v.y !== 0);
+  }
+}
+
+function sketchBindCanvas(){
+  const s = sketch, cv = s.canvas;
+  const view = () => s.entry.view;
+  // a pointer position in canvas units (before zoom), and the same position on the page being drawn on
+  const local = ev => { const r = cv.getBoundingClientRect(), k = s.k || 1; return { x:(ev.clientX - r.left) / k, y:(ev.clientY - r.top) / k }; };
+  const pos = ev => { const p = local(ev), v = view(); return { x:(p.x - v.x) / v.z, y:(p.y - v.y) / v.z }; };
+
+  const dropStroke = () => { if(s.cur){ s.cur = null; s.pid = null; sketchRedraw(); } };
+
+  // two fingers down: stop drawing and start a pinch (zoom) + drag (pan)
+  const startPinch = () => {
+    dropStroke();
+    if(s.pan){ s.pan = null; cv.classList.remove('is-panning'); }
+    const ids = Array.from(s.ptrs.keys()).slice(0, 2);
+    const A = s.ptrs.get(ids[0]), B = s.ptrs.get(ids[1]);
+    const r = cv.getBoundingClientRect(), k = s.k || 1, v = view();
+    s.g = {
+      a:ids[0], b:ids[1], d0:Math.max(1, Math.hypot(A.x - B.x, A.y - B.y)),
+      m0:{ x:((A.x + B.x) / 2 - r.left) / k, y:((A.y + B.y) / 2 - r.top) / k },
+      v0:{ z:v.z, x:v.x, y:v.y }
+    };
+    s.lock = true;
+  };
+  const updatePinch = () => {
+    const g = s.g, A = s.ptrs.get(g.a), B = s.ptrs.get(g.b); if(!A || !B) return;
+    const r = cv.getBoundingClientRect(), k = s.k || 1;
+    const mx = ((A.x + B.x) / 2 - r.left) / k, my = ((A.y + B.y) / 2 - r.top) / k;
+    const z = skClamp(g.v0.z * Math.hypot(A.x - B.x, A.y - B.y) / g.d0, SK_ZMIN, SK_ZMAX);
+    const px = (g.m0.x - g.v0.x) / g.v0.z, py = (g.m0.y - g.v0.y) / g.v0.z;   // page point that was between the fingers
+    sketchSetView(mx - px * z, my - py * z, z);                                // keep it between the fingers
+  };
+  const startPan = e => {
+    const p = local(e), v = view();
+    s.pan = { pid:e.pointerId, sx:p.x, sy:p.y, vx:v.x, vy:v.y };
+    cv.classList.add('is-panning');
+  };
+
+  cv.addEventListener('pointerdown', e => {
+    if(e.pointerType === 'mouse' && e.button !== 0 && e.button !== 1) return;
+    if(s.busy) return;                 // wait for the zoom animation to finish before drawing
+    e.preventDefault();
+    cv.focus({ preventScroll:true });
+    try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+    if(e.pointerType === 'touch'){
+      s.ptrs.set(e.pointerId, { x:e.clientX, y:e.clientY });
+      if(s.ptrs.size >= 2){ if(!s.g) startPinch(); return; }
+      if(s.lock) return;
+    }
+    if(s.g || s.pan) return;
+    if(e.button === 1 || s.space || sketchPrefs.tool === 'hand'){ startPan(e); return; }
+    const P = sketchPrefs, erase = P.tool === 'eraser', z = view().z;
+    s.pid = e.pointerId;
+    // the pen keeps the same size on screen at every zoom level, so zooming in lets you write finer detail
+    s.cur = { color:P.color, size:(erase ? P.size * 3 + 6 : P.size) / z, erase, pts:[pos(e)] };
+    sketchLiveSegment(false);
+  });
+  cv.addEventListener('pointermove', e => {
+    if(e.pointerType === 'touch' && s.ptrs.has(e.pointerId)) s.ptrs.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if(s.g){ updatePinch(); return; }
+    if(s.pan){
+      if(e.pointerId === s.pan.pid){ const p = local(e); sketchSetView(s.pan.vx + (p.x - s.pan.sx), s.pan.vy + (p.y - s.pan.sy), view().z); }
+      return;
+    }
+    if(!s.cur || e.pointerId !== s.pid) return;
+    const evs = (e.getCoalescedEvents && e.getCoalescedEvents()) || [];
+    (evs.length ? evs : [e]).forEach(ev => { s.cur.pts.push(pos(ev)); sketchLiveSegment(false); });
+  });
+  const end = e => {
+    if(e.pointerType === 'touch'){
+      s.ptrs.delete(e.pointerId);
+      if(s.g && (e.pointerId === s.g.a || e.pointerId === s.g.b)) s.g = null;
+      if(!s.ptrs.size) s.lock = false;
+    }
+    if(s.pan && e.pointerId === s.pan.pid){ s.pan = null; cv.classList.remove('is-panning'); return; }
+    if(!s.cur || e.pointerId !== s.pid) return;
+    sketchLiveSegment(true);
+    s.entry.strokes.push(s.cur);
+    s.entry.redo = [];
+    s.cur = null; s.pid = null;
+    sketchSyncUI();
+  };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+
+  // computers: pinch on a trackpad (or Ctrl + scroll) zooms; scrolling while zoomed in moves around
+  cv.addEventListener('wheel', e => {
+    const v = view(), k = s.k || 1;
+    if(e.ctrlKey || e.metaKey){
+      e.preventDefault();
+      const p = local(e);
+      sketchZoomBy(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.01)), p.x, p.y);
+    } else if(v.z > 1.001){
+      e.preventDefault();
+      sketchSetView(v.x - e.deltaX / k, v.y - e.deltaY / k, v.z);
+    }
+  }, { passive:false });
+  // Safari: stop the whole page from zooming while pinching on the sketchpad
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(n => cv.addEventListener(n, e => e.preventDefault()));
+
+  cv.addEventListener('keydown', e => {
+    if(e.key === ' ' && !s.space){ s.space = true; cv.classList.add('tool-hand'); e.preventDefault(); return; }   // hold Space + drag to move
+    if(!(e.ctrlKey || e.metaKey)){
+      if(e.key === '+' || e.key === '='){ e.preventDefault(); sketchZoomBy(1.25); }
+      else if(e.key === '-' || e.key === '_'){ e.preventDefault(); sketchZoomBy(0.8); }
+      else if(e.key === '0'){ e.preventDefault(); sketchZoomReset(); }
+      return;
+    }
+    const k = e.key.toLowerCase();
+    if(k === 'z'){ e.preventDefault(); e.shiftKey ? sketchRedo() : sketchUndo(); }
+    else if(k === 'y'){ e.preventDefault(); sketchRedo(); }
+  });
+  cv.addEventListener('keyup', e => { if(e.key === ' '){ s.space = false; sketchSyncUI(); } });
+  cv.addEventListener('blur', () => { if(s.space){ s.space = false; sketchSyncUI(); } });
+
+  // hide the site's custom cursor badge while drawing so the crosshair is the only pointer
+  cv.addEventListener('pointerenter', () => document.body.classList.add('sketch-hover'));
+  cv.addEventListener('pointerleave', () => { if(!s.cur && !s.pan) document.body.classList.remove('sketch-hover'); });
+  cv.addEventListener('lostpointercapture', () => { if(!cv.matches(':hover')) document.body.classList.remove('sketch-hover'); });
+}
+
+function sketchHasInk(){
+  const st = sketch ? sketch.entry.strokes : [];
+  return st.length > 0 && !st[st.length - 1].clear;
+}
+
+function sketchSetTool(t){ sketchPrefs.tool = t; sketchSyncUI(); }
+function sketchSetColor(c){ sketchPrefs.color = c; sketchPrefs.tool = 'pen'; sketchSyncUI(); }
+function sketchSetSize(v){ sketchPrefs.size = Number(v) || 4; sketchSyncUI(); }
+function sketchSetBg(b){ sketchPrefs.bg = b; sketchSyncUI(); }
+
+function sketchUndo(){
+  if(!sketch) return;
+  const e = sketch.entry; if(!e.strokes.length) return;
+  e.redo.push(e.strokes.pop());
+  sketchRedraw(); sketchSyncUI();
+}
+function sketchRedo(){
+  if(!sketch) return;
+  const e = sketch.entry; if(!e.redo.length) return;
+  e.strokes.push(e.redo.pop());
+  sketchRedraw(); sketchSyncUI();
+}
+// Clear is itself an undo-able step, so a mis-tap never loses work for good.
+function sketchClear(){
+  if(!sketch || !sketchHasInk()) return;
+  sketch.entry.strokes.push({ clear:true });
+  sketch.entry.redo = [];
+  sketchRedraw(); sketchSyncUI();
+}
+
+/* ---------- Maximize / minimize (zoom the sketchpad to full screen and back) ---------- */
+const SK_ANIM_MS = 420;
+function skReducedMotion(){ return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+function skMaxRect(){
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight, m = vw < 700 ? 0 : 16;
+  return { top:m, left:m, width:vw - m * 2, height:vh - m * 2 };
+}
+function skSetGeo(card, g){
+  card.style.top = g.top + 'px'; card.style.left = g.left + 'px';
+  card.style.width = g.width + 'px'; card.style.height = g.height + 'px';
+}
+// runs fn once the card has finished its size transition (with a safety timeout)
+function skAfterMove(card, fn){
+  let done = false;
+  const finish = () => { if(done) return; done = true; card.removeEventListener('transitionend', onEnd); fn(); };
+  const onEnd = e => { if(e.target === card && e.propertyName === 'width') finish(); };
+  card.addEventListener('transitionend', onEnd);
+  setTimeout(finish, skReducedMotion() ? 30 : SK_ANIM_MS + 160);
+}
+function skSetBtn(isMax){
+  const btn = document.getElementById('skMaxBtn'), txt = document.getElementById('skMaxTxt');
+  if(txt) txt.textContent = isMax ? 'Minimize' : 'Maximize';
+  if(btn){
+    btn.classList.toggle('is-max', isMax);
+    btn.setAttribute('aria-pressed', isMax ? 'true' : 'false');
+    btn.setAttribute('aria-label', isMax ? 'Minimize sketchpad' : 'Maximize sketchpad');
+  }
+}
+function sketchToggleMax(){
+  if(!sketch || sketch.busy || sketch.cur) return;
+  sketch.max ? sketchMinimize() : sketchMaximize();
+}
+function sketchMaximize(){
+  const s = sketch, card = document.querySelector('#sketchMount .sketch-card');
+  if(!s || !card) return;
+  s.busy = true;
+  const first = card.getBoundingClientRect();
+  // a placeholder keeps the page from jumping while the card floats above it
+  const ph = document.createElement('div');
+  ph.className = 'sk-placeholder'; ph.style.height = first.height + 'px';
+  card.parentNode.insertBefore(ph, card); s.ph = ph;
+  const bd = document.createElement('div');
+  bd.className = 'sk-backdrop'; bd.addEventListener('click', sketchToggleMax);
+  document.body.appendChild(bd); s.bd = bd;
+  const cta = card.querySelector('.game-cta');
+  if(cta) cta.style.maxHeight = cta.offsetHeight + 'px';
+  skSetGeo(card, first);                         // start exactly where the card already is
+  card.style.setProperty('--sk-r', getComputedStyle(card).borderTopLeftRadius);
+  card.classList.add('sk-fixed');
+  s.max = true;                                  // from now on the canvas scales as a zoom
+  void card.offsetWidth;                         // lock in the starting frame
+  document.documentElement.classList.add('sk-lock');
+  card.classList.add('sk-open'); bd.classList.add('show');
+  skSetGeo(card, skMaxRect());
+  window.addEventListener('resize', skOnResize);
+  skSetBtn(true);
+  skAfterMove(card, () => { s.busy = false; sketchFit(); try{ s.canvas.focus({ preventScroll:true }); }catch(_){} });
+}
+function sketchMinimize(){
+  const s = sketch, card = document.querySelector('#sketchMount .sketch-card');
+  if(!s || !card || !s.max || !s.ph) return;
+  s.busy = true;
+  window.removeEventListener('resize', skOnResize);
+  const target = s.ph.getBoundingClientRect();
+  card.classList.remove('sk-open');
+  if(s.bd) s.bd.classList.remove('show');
+  skSetGeo(card, target);
+  skSetBtn(false);
+  skAfterMove(card, () => {
+    card.classList.remove('sk-fixed');
+    ['top','left','width','height'].forEach(p => card.style[p] = '');
+    card.style.removeProperty('--sk-r');
+    const cta = card.querySelector('.game-cta'); if(cta) cta.style.maxHeight = '';
+    if(s.ph) s.ph.remove(); s.ph = null;
+    if(s.bd) s.bd.remove(); s.bd = null;
+    document.documentElement.classList.remove('sk-lock');
+    s.max = false; s.busy = false;
+    sketchFit();
+  });
+}
+function skOnResize(){
+  const card = document.querySelector('#sketchMount .sketch-card');
+  if(card && sketch && sketch.max && !sketch.busy) skSetGeo(card, skMaxRect());
+}
+function sketchResetMax(){
+  document.documentElement.classList.remove('sk-lock');
+  document.querySelectorAll('.sk-backdrop').forEach(n => n.remove());
+  window.removeEventListener('resize', skOnResize);
+}
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && sketch && sketch.max && !sketch.busy) sketchMinimize();
+});
+
+function sketchSyncUI(){
+  const m = document.getElementById('sketchMount');
+  if(!m || !sketch) return;
+  const P = sketchPrefs, e = sketch.entry;
+  m.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === P.tool));
+  m.querySelectorAll('.sk-color').forEach(b => b.classList.toggle('active', P.tool === 'pen' && b.dataset.color === P.color));
+  m.querySelectorAll('[data-bg]').forEach(b => b.classList.toggle('active', b.dataset.bg === P.bg));
+  const wrap = document.getElementById('skWrap');
+  if(wrap) wrap.className = 'sk-wrap sk-bg-' + P.bg;
+  sketch.canvas.classList.toggle('tool-hand', P.tool === 'hand' || sketch.space);
+  skApplyView();
+  const size = document.getElementById('skSize'), val = document.getElementById('skSizeVal');
+  if(size) size.value = P.size;
+  if(val) val.textContent = P.size;
+  document.getElementById('skUndo').disabled = !e.strokes.length;
+  document.getElementById('skRedo').disabled = !e.redo.length;
+  document.getElementById('skClear').disabled = !sketchHasInk();
+}
