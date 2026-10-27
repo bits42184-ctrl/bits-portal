@@ -252,7 +252,7 @@ function renderClassPickers(){
     }).join('');
     if(note){
       note.classList.remove('err');
-      note.textContent = !classSection ? '\uD83D\uDC46 Tap your class section so your teacher can follow your progress.'
+      note.textContent = !classSection ? ''
         : currentUser ? `\u2705 You are in ${classSection}. Picked the wrong one? Tap another section to change it.`
         : `You picked ${classSection}. Sign in with Google so your teacher can see your progress.`;
     }
@@ -678,17 +678,6 @@ function toggleNotifications(){
   and remove the `cursor:none` rule + the #cursorBadge element.
   Everything above is structured as a drop-in replacement for that.
 */
-
-/* ================= HERO: "BITS" written in binary ================= */
-(function buildHeroBytes(){
-  const el = document.getElementById('heroBytes');
-  if(!el) return;
-  el.innerHTML = 'BITS'.split('').map(ch => {
-    const bits = ch.charCodeAt(0).toString(2).padStart(8, '0');
-    const cells = bits.split('').map(b => `<i class="hb-bit b${b}">${b}</i>`).join('');
-    return `<div class="hb"><div class="hb-bits">${cells}</div><span class="hb-ch">${ch}</span></div>`;
-  }).join('');
-})();
 
 /* ================= HOME PAGE FLOW: Start Learning -> pick a level -> quiz ================= */
 // Hides every YouTube lesson card and unloads its player so nothing keeps playing in the background.
@@ -1212,8 +1201,8 @@ function showTopicResources(levelKey, topic){
 
   // YouTube video cards live in binary-portal.html (#resStaticVideos): stop & hide them all, then show this topic's set.
   stopAllLessonVideos();
-  if(video && video.staticId){
-    const el = document.getElementById(video.staticId);
+  {
+    const el = document.getElementById((video && video.staticId) ? video.staticId : 'vid-' + levelKey + '-' + topic.key);
     if(el){
       el.hidden = false;
       el.querySelectorAll('iframe[data-src]').forEach(f => { f.src = f.dataset.src; });
@@ -3275,3 +3264,41 @@ function sketchSyncUI(){
   document.getElementById('skRedo').disabled = !e.redo.length;
   document.getElementById('skClear').disabled = !sketchHasInk();
 }
+
+
+/* ================= HERO: tap a BITS letter to change its color ================= */
+(function initBitsLetters(){
+  const letters = document.querySelectorAll('.hero-brand .hl');
+  if(!letters.length) return;
+  // [letter color, light tint]
+  const PALETTE = [
+    ['#E8734A', '#FFE6DA'], ['#2C8F8F', '#D6F1EC'], ['#E39A2D', '#FFF0CC'], ['#7C5CD6', '#E7DFFA'],
+    ['#E0568C', '#FDE0EA'], ['#2E86DE', '#DCEBFB'], ['#4E9F3D', '#E0F3D8'], ['#D64545', '#FBDCDC']
+  ];
+  const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const idx = [0, 1, 2, 3];
+  function paint(el, i){
+    el.style.setProperty('--c', PALETTE[i][0]);
+    el.style.setProperty('--tint', PALETTE[i][1]);
+  }
+  letters.forEach((el, n) => {
+    paint(el, idx[n]);
+    el.addEventListener('click', () => {
+      idx[n] = (idx[n] + 1) % PALETTE.length;
+      paint(el, idx[n]);
+      el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+      if(reduce) return;
+      const col = PALETTE[idx[n]][0], shapes = ['50%', '4px', '50%'];
+      for(let k = 0; k < 14; k++){
+        const sp = document.createElement('i');
+        sp.className = 'hl-spark';
+        const ang = (Math.PI * 2 * k) / 14 + Math.random() * 0.4, dist = 70 + Math.random() * 60;
+        sp.style.cssText = `--sz:${6 + Math.random() * 9}px; --sc:${k % 3 === 0 ? '#fff' : (k % 3 === 1 ? col : PALETTE[(idx[n] + 3) % PALETTE.length][0])};` +
+          `--br:${shapes[k % 3]}; --dx:${Math.cos(ang) * dist}px; --dy:${Math.sin(ang) * dist}px; --rot:${Math.round(Math.random() * 360)}deg;`;
+        el.appendChild(sp);
+        setTimeout(() => sp.remove(), 850);
+      }
+    });
+    el.addEventListener('animationend', e => { if(e.animationName === 'hl-pop') el.classList.remove('pop'); });
+  });
+})();
