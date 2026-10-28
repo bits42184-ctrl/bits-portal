@@ -2805,8 +2805,12 @@ function gameNext(){
   const s = gameState; if(!s || !s.checked) return;
   s.idx++; s.typed = ''; s.checked = false; s.showSol = false; s.fb = ''; s.fbClass = '';
   renderGame();
-  gameFocusInput();
-  if(s.idx < s.questions.length) window.scrollTo({ top: Math.max(0, document.getElementById('gameMount').getBoundingClientRect().top + window.scrollY - 90), behavior:'smooth' });
+  gameFocusInput();   // no auto-scroll between questions: the page stays exactly where the student is
+  // When the whole set is finished the page gets shorter; only if the result card ended up off-screen, bring it into view (centred, no jump to the top).
+  if(s.idx >= s.questions.length){
+    const f = document.querySelector('#gameMount .game-finish');
+    if(f){ const r = f.getBoundingClientRect(); if(r.top < 70 || r.bottom > window.innerHeight - 70) f.scrollIntoView({ block:'center', behavior:'smooth' }); }
+  }
 }
 
 function gameRestart(){ gameInit(gameState.topic); }
