@@ -1146,42 +1146,39 @@ function from10steps(from){
                      : `Convert each ${BASE_WORD[from]} number to decimal: ${FROM_METHOD[from]}.`;
 }
 
-// Each "set" lists its topics with the difficulty assigned to it (20 questions per topic).
-const SET_ARITH = [
-  [['add','easy'],   ['sub','medium']],
-  [['add','medium'], ['sub','hard']],
-  [['add','hard'],   ['sub','easy']],
-  [['mul','easy'],   ['div','medium']],
-  [['mul','medium'], ['div','hard']],
-  [['mul','hard'],   ['div','easy']]
-];
-const SET_CONV = [
-  [['bin-dec','hard'],   ['dec-bin','easy'],   ['bin-oct','medium']],
-  [['bin-dec','easy'],   ['dec-bin','medium'], ['bin-oct','hard']],
-  [['bin-dec','medium'], ['dec-bin','hard'],   ['bin-oct','easy']],
-  [['oct-bin','hard'],   ['bin-hex','easy'],   ['hex-bin','medium']],
-  [['oct-bin','easy'],   ['bin-hex','medium'], ['hex-bin','hard']],
-  [['oct-bin','medium'], ['bin-hex','hard'],   ['hex-bin','easy']]
-];
-const SET_TONES = ['a', 'b', 'c', 'd', 'a', 'b'];
-// Inside every set the topics run Easy, then Medium, then Hard.
-const DIFF_ORDER = { easy:0, medium:1, hard:2 };
-function byDifficulty(x, y){ return DIFF_ORDER[x.diff] - DIFF_ORDER[y.diff]; }
+// Every topic ("family") holds three levels: Easy, Medium and Hard, 20 questions each.
+const DIFFS = ['easy', 'medium', 'hard'];
 const SECTION_ORDER = ['arith', 'conv'];
+function buildArithFamily(op){
+  const O = ARITH[op];
+  return { key: op, title: 'Binary ' + O.name, sub: `${O.verb} binary numbers, answer in binary`, icon: O.sym,
+           topics: DIFFS.map(d => buildArithTopic(op, d)) };
+}
+function buildConvFamily(k){
+  const src = CONV_SRC[k], item = CONV_ITEMS[k];
+  return { key: k, title: item.title, sub: src.sub, icon: src.icon, small: true,
+           topics: DIFFS.map(d => buildConvTopic(k, d)) };
+}
 const LEVELS = {
   arith: {
     name: 'Binary Arithmetic', short: 'Arithmetic', sym: '\u00B1', tone: 'a',
     desc: 'Add, subtract, multiply and divide binary numbers.',
-    intro: 'Six sets of binary arithmetic. Open a topic for its quick lesson, cheat sheet and a 20-question challenge.',
-    groups: SET_ARITH.map((set, i) => ({ label: 'Set ' + (i + 1), tone: SET_TONES[i], topics: set.map(([op, d]) => buildArithTopic(op, d)).sort(byDifficulty) }))
+    intro: 'Four topics. Open one to pick Easy, Medium or Hard.',
+    groups: [
+      { label: 'Addition and subtraction',   tone: 'a', ops: ['add', 'sub'] },
+      { label: 'Multiplication and division', tone: 'b', ops: ['mul', 'div'] }
+    ].map(g => ({ label: g.label, tone: g.tone, families: g.ops.map(buildArithFamily) }))
   },
   conv: {
     name: 'Binary Conversion', short: 'Conversion', sym: '\u21C4', tone: 'c',
     desc: 'Change numbers between binary, decimal, octal and hexadecimal.',
-    intro: 'Six sets of binary conversions. Open a topic for its quick lesson, cheat sheet and a 20-question challenge.',
-    groups: SET_CONV.map((set, i) => ({ label: 'Set ' + (i + 1), tone: SET_TONES[i], topics: set.map(([k, d]) => buildConvTopic(k, d)).sort(byDifficulty) }))
+    intro: 'Six topics. Open one to pick Easy, Medium or Hard.',
+    groups: CONV_GROUPS.map(g => ({ label: g.label, tone: g.tone, families: g.items.map(it => buildConvFamily(it.k)) }))
   }
 };
+function familiesOf(levelKey){ return LEVELS[levelKey].groups.flatMap(g => g.families); }
+function allTopicsOf(levelKey){ return familiesOf(levelKey).flatMap(f => f.topics); }
+function familyOf(levelKey, topicKey){ return familiesOf(levelKey).find(f => f.topics.some(t => t.key === topicKey)); }
 
 // The two section cards on the "Choose a section" screen.
 function renderSections(){
@@ -1189,15 +1186,15 @@ function renderSections(){
   if(!el) return;
   el.innerHTML = SECTION_ORDER.map(op => {
     const L = LEVELS[op];
-    const topics = L.groups.flatMap(g => g.topics);
-    const qs = topics.reduce((n, t) => n + t.game.questions.length, 0);
+    const fams = familiesOf(op);
+    const qs = allTopicsOf(op).reduce((n, t) => n + t.game.questions.length, 0);
     return `
       <button class="sec-card sec-${L.tone}" onclick="chooseLevel('${op}')">
         <span class="sec-symbol" aria-hidden="true">${L.sym}</span>
         <span class="sec-body">
           <span class="sec-name">${L.name}</span>
           <span class="sec-desc">${L.desc}</span>
-          <span class="sec-meta">${topics.length} topics \u00B7 ${qs} questions</span>
+          <span class="sec-meta">${fams.length} topics \u00B7 ${qs} questions</span>
         </span>
         <span class="topic-arrow">\u2192</span>
       </button>`;
@@ -1210,7 +1207,7 @@ function openSections(){
   window.scrollTo({ top:0, behavior:'smooth' });
 }
 
-// Level card clicked: show the topic picker and remember the level for this student.
+// Section card clicked: show its topics and remember the section for this student.
 function chooseLevel(levelKey){
   const level = LEVELS[levelKey];
   if(!level) return;
@@ -1221,7 +1218,7 @@ function chooseLevel(levelKey){
   showWizardStep('topics');
 }
 
-// Builds the organized grid of topic buttons, one labelled group at a time.
+// Topic cards, grouped under labels (Binary and decimal, Binary and octal, ...).
 function renderTopics(levelKey){
   const level = LEVELS[levelKey];
   document.getElementById('topicsHeading').textContent = level.name;
@@ -1229,17 +1226,17 @@ function renderTopics(levelKey){
   document.getElementById('topicGroups').innerHTML = level.groups.map(group => `
     <div class="topic-group-label tone-${group.tone}"><span class="tg-dot"></span>${escapeHtml(group.label)}</div>
     <div class="topic-grid topic-grid-wide">
-      ${group.topics.map(t => {
-        const n = t.game && t.game.questions ? t.game.questions.length : 0;
+      ${group.families.map(f => {
+        const qs = f.topics.flatMap(t => t.game.questions);
         return `
-        <button class="topic-card tone-${group.tone}" onclick="openTopic('${levelKey}', '${t.key}')">
-          <span class="topic-icon${t.small ? ' topic-icon-sm' : ''}">${escapeHtml(t.icon)}</span>
+        <button class="topic-card tone-${group.tone}" onclick="openFamily('${levelKey}', '${f.key}')">
+          <span class="topic-icon${f.small ? ' topic-icon-sm' : ''}">${escapeHtml(f.icon)}</span>
           <span class="topic-text">
-            <span class="topic-title">${escapeHtml(t.title)}</span>
-            <span class="topic-sub">${escapeHtml(t.sub)}</span>
+            <span class="topic-title">${escapeHtml(f.title)}</span>
+            <span class="topic-sub">${escapeHtml(f.sub)}</span>
             <span class="topic-meta">
-              <span class="topic-count">${n} questions</span>
-              ${['easy','medium','hard'].map(lv => { const c = t.game.questions.filter(q => q.level === lv).length; return c ? `<span class="topic-mix mix-${lv}"><i></i>${c} ${lv}</span>` : ''; }).join('')}
+              <span class="topic-count">${qs.length} questions</span>
+              ${DIFFS.map(lv => { const c = qs.filter(q => q.level === lv).length; return c ? `<span class="topic-mix mix-${lv}"><i></i>${c} ${lv}</span>` : ''; }).join('')}
             </span>
           </span>
           <span class="topic-arrow">\u2192</span>
@@ -1248,25 +1245,67 @@ function renderTopics(levelKey){
     </div>`).join('');
 }
 
-// Topic card clicked: open that topic's lesson page.
-function openTopic(levelKey, topicKey){
+// Topic card clicked: show its Easy / Medium / Hard levels.
+const LEVEL_BLURB = {
+  easy:   { stars: '\u2605',             text: 'Smaller numbers to warm up', color: '#3FAE86', dark: '#2E8A69' },
+  medium: { stars: '\u2605\u2605',       text: 'Bigger numbers, more steps',  color: '#E0B232', dark: '#B88A12' },
+  hard:   { stars: '\u2605\u2605\u2605', text: 'The big ones. Test yourself', color: '#E5584F', dark: '#C0382F' }
+};
+function openFamily(levelKey, familyKey){
+  const fam = familiesOf(levelKey).find(f => f.key === familyKey);
+  if(!fam) return;
   const level = LEVELS[levelKey];
-  const topic = level && level.groups.flatMap(g => g.topics).find(t => t.key === topicKey);
+  document.getElementById('levelsBody').innerHTML = `
+    <div class="res-header">
+      <span class="res-badge${fam.icon.length >= 3 ? ' res-badge-sm' : ''}">${escapeHtml(fam.icon)}</span>
+      <div>
+        <div class="res-eyebrow">${escapeHtml(level.name)}</div>
+        <h3 class="res-title">${escapeHtml(fam.title)}</h3>
+      </div>
+    </div>
+    <p class="res-intro">Pick a level. Each level has its own quick lesson and 20 questions.</p>
+    <div class="topic-grid topic-grid-wide lvl-grid">
+      ${fam.topics.map(t => {
+        const B = LEVEL_BLURB[t.diff];
+        return `
+        <button class="topic-card" style="--tone:${B.color}; --tone-dark:${B.dark};" onclick="openTopic('${levelKey}', '${t.key}')">
+          <span class="topic-icon topic-icon-sm">${B.stars}</span>
+          <span class="topic-text">
+            <span class="topic-title">${DIFF_NAME[t.diff]}</span>
+            <span class="topic-sub">${B.text}</span>
+            <span class="topic-meta"><span class="topic-count">${t.game.questions.length} questions</span></span>
+          </span>
+          <span class="topic-arrow">\u2192</span>
+        </button>`;
+      }).join('')}
+    </div>`;
+  showWizardStep('levels');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+function backToTopicList(){
+  showWizardStep('topics');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+// Level card clicked: open that level's lesson page.
+function openTopic(levelKey, topicKey){
+  const topic = allTopicsOf(levelKey).find(t => t.key === topicKey);
   if(topic) showTopicResources(levelKey, topic);
 }
 
-// Shows the lesson materials (video, slides, assessment) for a topic.
 let currentTopicRef = null;
 
-function allTopicsOf(levelKey){ return LEVELS[levelKey].groups.flatMap(g => g.topics); }
-
+// Back from a lesson page: return to that topic's Easy / Medium / Hard screen.
 function goBackToTopics(){
+  const fam = currentTopicRef && familyOf(currentTopicRef.levelKey, currentTopicRef.topicKey);
+  if(fam){ openFamily(currentTopicRef.levelKey, fam.key); return; }
   showWizardStep('topics');
   window.scrollTo({top:0, behavior:'smooth'});
 }
 function backToTopicTop(){
   window.scrollTo({top:0, behavior:'smooth'});
 }
+// Next goes Easy, Medium, Hard, then on to the next topic's Easy.
 function goNextTopic(){
   if(!currentTopicRef) return;
   const list = allTopicsOf(currentTopicRef.levelKey);
@@ -1275,7 +1314,8 @@ function goNextTopic(){
     showTopicResources(currentTopicRef.levelKey, list[idx + 1]);
     window.scrollTo({top:0, behavior:'smooth'});
   } else {
-    goBackToTopics();   // that was the last topic
+    renderTopics(currentTopicRef.levelKey);   // that was the last level of the last topic
+    backToTopicList();
   }
 }
 
@@ -1283,7 +1323,7 @@ function showTopicResources(levelKey, topic){
   currentTopicRef = { levelKey, topicKey: topic.key };
   const _list = allTopicsOf(levelKey);
   const _isLast = _list.findIndex(t => t.key === topic.key) >= _list.length - 1;
-  document.getElementById('resNextBtn').textContent = _isLast ? 'All topics ✓' : 'Next Topic →';
+  document.getElementById('resNextBtn').textContent = _isLast ? 'All topics ✓' : 'Next Level →';
   const level = LEVELS[levelKey];
   const badge = document.getElementById('resBadge');
   badge.textContent = topic.icon;
