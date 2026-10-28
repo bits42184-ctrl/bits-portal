@@ -122,7 +122,7 @@
       <!-- STEP 2: CHOOSE A SECTION (cards are built by renderSections() in website.js) -->
       <div class="wizard-step" id="step-sections">
         <div class="section-label" style="margin-top:0;"><h3>Choose a section</h3></div>
-        <p class="level-intro">Pick Binary Arithmetic or Binary Conversion. Each one has 6 sets, and every topic has 20 questions.</p>
+        <p class="level-intro">Pick Binary Arithmetic (4 topics) or Binary Conversion (6 topics). Every topic has Easy, Medium and Hard levels with 20 questions each.</p>
         <div class="section-grid" id="sectionGrid"></div>
         <button class="lecture-action-btn" style="margin-top:24px;" onclick="showWizardStep('welcome')">← Back</button>
       </div>
@@ -130,9 +130,15 @@
       <!-- STEP 3: CHOOSE A TOPIC (cards are built by renderTopics() in website.js) -->
       <div class="wizard-step" id="step-topics">
         <div class="section-label" style="margin-top:0;"><h3 id="topicsHeading">Binary Arithmetic</h3></div>
-        <p class="level-intro" id="topicsIntro">Pick a conversion to open its quick lesson and Easy, Medium and Hard challenges.</p>
+        <p class="level-intro" id="topicsIntro">Pick a topic, then choose Easy, Medium or Hard.</p>
         <div id="topicGroups"></div>
         <button class="lecture-action-btn" style="margin-top:24px;" onclick="openSections()">← Back</button>
+      </div>
+
+      <!-- STEP 3b: CHOOSE EASY / MEDIUM / HARD (built by openFamily() in website.js) -->
+      <div class="wizard-step" id="step-levels">
+        <div id="levelsBody"></div>
+        <button class="lecture-action-btn" style="margin-top:24px;" onclick="backToTopicList()">← Back</button>
       </div>
 
       <!-- STEP 4: TOPIC RESOURCES (built by showTopicResources() in website.js) -->
@@ -145,7 +151,7 @@
             <h3 class="res-title" id="resTitle">Binary to Decimal</h3>
           </div>
         </div>
-        <p class="res-intro">Read the quick lesson, then pick Easy, Medium or Hard below. Each level has 20 questions.</p>
+        <p class="res-intro">Read the quick lesson, then answer the 20 questions below.</p>
         <!-- Video cards for a topic go inside this container (website.js shows the set whose id matches a topic's `staticId`). -->
         <div id="resStaticVideos">
           <div class="res-video-set" id="vid-conv-bin-hex_easy" hidden>
@@ -198,9 +204,9 @@
         <div class="res-bottom-bar">
           <div class="res-bar-group">
             <button class="res-bar-btn left" onclick="backToTopicTop()">↑ Back to Topic</button>
-            <button class="res-bar-btn left" onclick="goBackToTopics()">← Back to Topics</button>
+            <button class="res-bar-btn left" onclick="goBackToTopics()">← Back to Levels</button>
           </div>
-          <button class="res-bar-btn right" id="resNextBtn" onclick="goNextTopic()">Next Topic →</button>
+          <button class="res-bar-btn right" id="resNextBtn" onclick="goNextTopic()">Next Level →</button>
         </div>
       </div>
     </section>
