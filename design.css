@@ -1991,3 +1991,10 @@
     .hl.pop, .hl.pop::after{animation:none;}
     .hl-spark{display:none;}
   }
+/* Easy / Medium / Hard screen: three cards in a row */
+.topic-grid.topic-grid-wide.lvl-grid{grid-template-columns:repeat(3, minmax(0, 1fr));}
+.lvl-grid .topic-card{flex-direction:column; align-items:flex-start;}
+.lvl-grid .topic-icon{letter-spacing:1px;}
+.lvl-grid .topic-arrow{align-self:flex-end;}
+@media (max-width:900px){ .topic-grid.topic-grid-wide.lvl-grid{grid-template-columns:1fr;} .lvl-grid .topic-card{flex-direction:row; align-items:center;} .lvl-grid .topic-arrow{align-self:center;} }
+.app.mobile-mode .topic-grid.topic-grid-wide.lvl-grid{grid-template-columns:1fr;}
