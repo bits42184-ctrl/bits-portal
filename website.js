@@ -711,7 +711,7 @@ const BEGINNER_SRC = {
     groups: [
       { label: "Binary and decimal", tone: 'a', topics: [
         { key:"bin-dec", title:"Binary to Decimal", sub:"Add up the place values", icon:"2→10", small:true,
-          game:{ cta:"Think you can master Binary to Decimal? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+          game:{ cta:"Think you can master Binary to Decimal? Answer every question, beat your best score, and tap Show solution whenever you're stuck!", questions:[
             // ---------- EASY (7 questions) ----------
             {"level": "easy", "q": "Convert this binary number to decimal.", "num": "101", "from": 2, "to": 10, "base": 10, "answer": "5", "solution": ["Write the place values above the bits, from left to right: 4, 2, 1.", "Keep only the place values that sit above a 1: 4, 1.", "Add them up: 4 + 1 = 5."]},
             {"level": "easy", "q": "Convert this binary number to decimal.", "num": "110", "from": 2, "to": 10, "base": 10, "answer": "6", "solution": ["Write the place values above the bits, from left to right: 4, 2, 1.", "Keep only the place values that sit above a 1: 4, 2.", "Add them up: 4 + 2 = 6."]},
@@ -740,7 +740,7 @@ const BEGINNER_SRC = {
           resources:[],
           focus:["adding place values of bits that are 1", "bytes up to 255"] },
         { key:"dec-bin", title:"Decimal to Binary", sub:"Divide by 2, read the remainders", icon:"10→2", small:true,
-          game:{ cta:"Think you can master Decimal to Binary? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+          game:{ cta:"Think you can master Decimal to Binary? Answer every question, beat your best score, and tap Show solution whenever you're stuck!", questions:[
             // ---------- EASY (7 questions) ----------
             {"level": "easy", "q": "Convert this decimal number to binary.", "num": "3", "from": 10, "to": 2, "base": 2, "answer": "11", "solution": ["Divide by 2 again and again, keeping each remainder: 3 ÷ 2 = 1 remainder 1; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 1.", "So 3 in binary is 11."]},
             {"level": "easy", "q": "Convert this decimal number to binary.", "num": "5", "from": 10, "to": 2, "base": 2, "answer": "101", "solution": ["Divide by 2 again and again, keeping each remainder: 5 ÷ 2 = 2 remainder 1; 2 ÷ 2 = 1 remainder 0; 1 ÷ 2 = 0 remainder 1.", "Read the remainders from the last one up to the first one: 1 0 1.", "So 5 in binary is 101."]},
@@ -771,7 +771,7 @@ const BEGINNER_SRC = {
       ] },
       { label: "Binary and octal", tone: 'b', topics: [
         { key:"bin-oct", title:"Binary to Octal", sub:"Group the bits in threes", icon:"2→8", small:true,
-          game:{ cta:"Think you can master Binary to Octal? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+          game:{ cta:"Think you can master Binary to Octal? Answer every question, beat your best score, and tap Show solution whenever you're stuck!", questions:[
             // ---------- EASY (7 questions) ----------
             {"level": "easy", "q": "Convert this binary number to octal.", "num": "101", "from": 2, "to": 8, "base": 8, "answer": "5", "solution": ["Split the bits into groups of 3, starting from the right: 101.", "Convert each group to one digit: 101 = 5.", "Write the digits side by side: 5."]},
             {"level": "easy", "q": "Convert this binary number to octal.", "num": "110", "from": 2, "to": 8, "base": 8, "answer": "6", "solution": ["Split the bits into groups of 3, starting from the right: 110.", "Convert each group to one digit: 110 = 6.", "Write the digits side by side: 6."]},
@@ -800,7 +800,7 @@ const BEGINNER_SRC = {
           resources:[],
           focus:["grouping bits in 3s", "padding with leading zeros"] },
         { key:"oct-bin", title:"Octal to Binary", sub:"Turn each digit into 3 bits", icon:"8→2", small:true,
-          game:{ cta:"Think you can master Octal to Binary? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+          game:{ cta:"Think you can master Octal to Binary? Answer every question, beat your best score, and tap Show solution whenever you're stuck!", questions:[
             // ---------- EASY (7 questions) ----------
             {"level": "easy", "q": "Convert this octal number to binary.", "num": "2", "from": 8, "to": 2, "base": 2, "answer": "10", "solution": ["Turn each octal digit into 3 bits: 2 = 010.", "Join the groups together: 010.", "Drop the zeros at the very front: 10."]},
             {"level": "easy", "q": "Convert this octal number to binary.", "num": "3", "from": 8, "to": 2, "base": 2, "answer": "11", "solution": ["Turn each octal digit into 3 bits: 3 = 011.", "Join the groups together: 011.", "Drop the zeros at the very front: 11."]},
@@ -831,7 +831,7 @@ const BEGINNER_SRC = {
       ] },
       { label: "Binary and hexadecimal", tone: 'c', topics: [
         { key:"bin-hex", title:"Binary to Hexadecimal", sub:"Group the bits in fours", icon:"2→16", small:true,
-          game:{ cta:"Think you can master Binary to Hexadecimal? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+          game:{ cta:"Think you can master Binary to Hexadecimal? Answer every question, beat your best score, and tap Show solution whenever you're stuck!", questions:[
             // ---------- EASY (7 questions) ----------
             {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1001", "from": 2, "to": 16, "base": 16, "answer": "9", "solution": ["Split the bits into groups of 4, starting from the right: 1001.", "Convert each group to one digit: 1001 = 9.", "Write the digits side by side: 9."]},
             {"level": "easy", "q": "Convert this binary number to hexadecimal.", "num": "1010", "from": 2, "to": 16, "base": 16, "answer": "A", "solution": ["Split the bits into groups of 4, starting from the right: 1010.", "Convert each group to one digit: 1010 = A (10).", "Write the digits side by side: A."]},
@@ -860,7 +860,7 @@ const BEGINNER_SRC = {
           resources:[],
           focus:["grouping bits in 4s", "hex digits A to F"] },
         { key:"hex-bin", title:"Hexadecimal to Binary", sub:"Turn each digit into 4 bits", icon:"16→2", small:true,
-          game:{ cta:"Think you can master Hexadecimal to Binary? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!", questions:[
+          game:{ cta:"Think you can master Hexadecimal to Binary? Answer every question, beat your best score, and tap Show solution whenever you're stuck!", questions:[
             // ---------- EASY (7 questions) ----------
             {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "3", "from": 16, "to": 2, "base": 2, "answer": "11", "solution": ["Turn each hexadecimal digit into 4 bits: 3 = 0011.", "Join the groups together: 0011.", "Drop the zeros at the very front: 11."]},
             {"level": "easy", "q": "Convert this hexadecimal number to binary.", "num": "5", "from": 16, "to": 2, "base": 2, "answer": "101", "solution": ["Turn each hexadecimal digit into 4 bits: 5 = 0101.", "Join the groups together: 0101.", "Drop the zeros at the very front: 101."]},
@@ -1046,7 +1046,7 @@ function buildArithTopic(op, diff){
     title,
     sub: `${O.verb} binary numbers, answer in binary`,
     icon: O.sym,
-    game: { cta: `Think you can master ${title} (${DIFF_NAME[diff]})? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!`, questions },
+    game: { cta: `Think you can master ${title} (${DIFF_NAME[diff]})? Answer every question, beat your best score, and tap Show solution whenever you're stuck!`, questions },
     lesson: {
       title: `How to ${O.verb.toLowerCase()} binary numbers`,
       idea: O.idea,
@@ -1138,7 +1138,7 @@ function buildConvTopic(k, diff){
   }));
   return Object.assign({}, src, {
     key: k + '_' + diff, ck: k, diff,
-    game: { cta: `Think you can master ${item.title} (${DIFF_NAME[diff]})? Answer all 20 questions, beat your best score, and tap Show solution whenever you're stuck!`, questions }
+    game: { cta: `Think you can master ${item.title} (${DIFF_NAME[diff]})? Answer every question, beat your best score, and tap Show solution whenever you're stuck!`, questions }
   });
 }
 function from10steps(from){
@@ -1187,14 +1187,13 @@ function renderSections(){
   el.innerHTML = SECTION_ORDER.map(op => {
     const L = LEVELS[op];
     const fams = familiesOf(op);
-    const qs = allTopicsOf(op).reduce((n, t) => n + t.game.questions.length, 0);
     return `
       <button class="sec-card sec-${L.tone}" onclick="chooseLevel('${op}')">
         <span class="sec-symbol" aria-hidden="true">${L.sym}</span>
         <span class="sec-body">
           <span class="sec-name">${L.name}</span>
           <span class="sec-desc">${L.desc}</span>
-          <span class="sec-meta">${fams.length} topics \u00B7 ${qs} questions</span>
+          <span class="sec-meta">${fams.length} topics</span>
         </span>
         <span class="topic-arrow">\u2192</span>
       </button>`;
@@ -1227,7 +1226,6 @@ function renderTopics(levelKey){
     <div class="topic-group-label tone-${group.tone}"><span class="tg-dot"></span>${escapeHtml(group.label)}</div>
     <div class="topic-grid topic-grid-wide">
       ${group.families.map(f => {
-        const qs = f.topics.flatMap(t => t.game.questions);
         return `
         <button class="topic-card tone-${group.tone}" onclick="openFamily('${levelKey}', '${f.key}')">
           <span class="topic-icon${f.small ? ' topic-icon-sm' : ''}">${escapeHtml(f.icon)}</span>
@@ -1235,9 +1233,9 @@ function renderTopics(levelKey){
             <span class="topic-title">${escapeHtml(f.title)}</span>
             <span class="topic-sub">${escapeHtml(f.sub)}</span>
             <span class="topic-meta">
-              <span class="topic-count">${qs.length} questions</span>
-              ${DIFFS.map(lv => { const c = qs.filter(q => q.level === lv).length; return c ? `<span class="topic-mix mix-${lv}"><i></i>${c} ${lv}</span>` : ''; }).join('')}
+              ${DIFFS.map(lv => `<span class="topic-mix mix-${lv}"><i></i>${DIFF_NAME[lv]}</span>`).join('')}
             </span>
+          </span>
           </span>
           <span class="topic-arrow">\u2192</span>
         </button>`;
@@ -1245,11 +1243,11 @@ function renderTopics(levelKey){
     </div>`).join('');
 }
 
-// Topic card clicked: show its Easy / Medium / Hard levels.
-const LEVEL_BLURB = {
-  easy:   { stars: '\u2605',             text: 'Smaller numbers to warm up', color: '#3FAE86', dark: '#2E8A69' },
-  medium: { stars: '\u2605\u2605',       text: 'Bigger numbers, more steps',  color: '#E0B232', dark: '#B88A12' },
-  hard:   { stars: '\u2605\u2605\u2605', text: 'The big ones. Test yourself', color: '#E5584F', dark: '#C0382F' }
+// Topic card clicked: show the "Choose your difficulty" screen (Easy / Medium / Hard).
+const LEVEL_UI = {
+  easy:   { desc: 'Warm-up questions to get you started', bars: 1 },
+  medium: { desc: 'A bit trickier. Time to think!',        bars: 2 },
+  hard:   { desc: 'Challenge mode for math champions',     bars: 3 }
 };
 function openFamily(levelKey, familyKey){
   const fam = familiesOf(levelKey).find(f => f.key === familyKey);
@@ -1263,19 +1261,21 @@ function openFamily(levelKey, familyKey){
         <h3 class="res-title">${escapeHtml(fam.title)}</h3>
       </div>
     </div>
-    <p class="res-intro">Pick a level. Each level has its own quick lesson and 20 questions.</p>
-    <div class="topic-grid topic-grid-wide lvl-grid">
-      ${fam.topics.map(t => {
-        const B = LEVEL_BLURB[t.diff];
+    <div class="dp-banner">
+      <span class="dp-rocket" aria-hidden="true">\uD83D\uDE80</span>
+      <p>Think you can master <b>${escapeHtml(fam.title)}</b>? Pick a level, beat your best score, and tap Show solution whenever you're stuck!</p>
+    </div>
+    <h4 class="dp-title">Choose your difficulty</h4>
+    <div class="dp-grid">
+      ${fam.topics.map((t, i) => {
+        const U = LEVEL_UI[t.diff];
         return `
-        <button class="topic-card" style="--tone:${B.color}; --tone-dark:${B.dark};" onclick="openTopic('${levelKey}', '${t.key}')">
-          <span class="topic-icon topic-icon-sm">${B.stars}</span>
-          <span class="topic-text">
-            <span class="topic-title">${DIFF_NAME[t.diff]}</span>
-            <span class="topic-sub">${B.text}</span>
-            <span class="topic-meta"><span class="topic-count">${t.game.questions.length} questions</span></span>
-          </span>
-          <span class="topic-arrow">\u2192</span>
+        <button type="button" class="dp-card dp-${t.diff}" style="--i:${i};" onclick="openTopic('${levelKey}', '${t.key}')" aria-label="${DIFF_NAME[t.diff]} level: ${escapeHtml(fam.title)}">
+          <span class="dp-orb" aria-hidden="true"></span>
+          <span class="dp-name">${DIFF_NAME[t.diff]}</span>
+          <span class="dp-desc">${U.desc}</span>
+          <span class="dp-meter" aria-hidden="true">${[1, 2, 3].map(n => `<i class="${n <= U.bars ? 'on' : ''}"></i>`).join('')}</span>
+          <span class="dp-play">Play <b>\u2192</b></span>
         </button>`;
       }).join('')}
     </div>`;
@@ -2685,7 +2685,6 @@ function renderGame(){
           <span class="gl-emoji">${L.emoji}</span>
           <span class="gl-name">${L.label}</span>
           <span class="gl-desc">${L.desc}</span>
-          <span class="gl-count">${n} question${n === 1 ? '' : 's'}</span>
           <span class="gl-go">Play →</span>
         </button>`;
     }).join('');
