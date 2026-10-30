@@ -2171,3 +2171,49 @@
 /* long numbers (more than 8 digits, e.g. 16-bit binary) get a smaller font on small screens so they wrap in two lines */
 @media (max-width:520px){ .conv-num.long{font-size:20px;} }
 .app.mobile-mode .conv-num.long{font-size:20px;}
+
+
+/* ===== LESSON PAGE: Quick lesson and Cheat sheet are dropdowns (closed until tapped) ===== */
+.lx-stack{display:flex; flex-direction:column; gap:16px;}
+.lx-drop{
+  position:relative; overflow:hidden; background:#fff; border:2px solid var(--line); border-radius:var(--radius-lg);
+  box-shadow:0 5px 0 var(--line); transition:border-color .2s ease, box-shadow .2s ease;
+}
+.lx-drop::before{content:''; position:absolute; left:0; right:0; top:0; height:6px; background:linear-gradient(90deg, var(--teal), #6FC7A6, #B7E38A, var(--orange));}
+.lx-cheat::before{background:linear-gradient(90deg, #7C5CD6, var(--teal) 55%, var(--orange));}
+.lx-drop.open{border-color:var(--teal); box-shadow:0 5px 0 var(--teal-dark);}
+.lx-cheat.open{border-color:#7C5CD6; box-shadow:0 5px 0 #5B3FB0;}
+.lx-btn{
+  display:flex; align-items:center; gap:14px; width:100%; padding:24px 22px 18px; margin:0;
+  background:none; border:0; cursor:pointer; text-align:left; font-family:inherit; color:var(--ink);
+  -webkit-tap-highlight-color:transparent; transition:background .15s ease;
+}
+.lx-btn:hover{background:var(--surface);}
+.lx-btn:focus-visible{outline:3px solid var(--orange); outline-offset:-4px;}
+.lx-badge{
+  width:52px; height:52px; border-radius:16px; display:grid; place-items:center; font-size:26px; flex:none;
+  background:linear-gradient(135deg, var(--teal), var(--teal-dark)); box-shadow:0 5px 0 var(--teal-dark);
+}
+.lx-cheat .lx-badge{background:#EFE9FB; box-shadow:0 4px 0 #D9CEF3;}
+.lx-txt{display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;}
+.lx-title{font-family:'Fredoka',sans-serif; font-weight:600; font-size:21px; line-height:1.2; color:var(--ink);}
+.lx-state{
+  display:inline-flex; align-items:center; gap:8px; flex:none; padding:8px 14px; border-radius:999px;
+  background:var(--surface); font-weight:700; font-size:13.5px; color:var(--teal-dark); transition:background .2s ease, color .2s ease;
+}
+.lx-chev{display:inline-block; font-size:16px; line-height:1; transition:transform .25s ease;}
+.lx-drop.open .lx-chev{transform:rotate(180deg);}
+.lx-drop.open .lx-state{background:var(--teal); color:#fff;}
+.lx-cheat.open .lx-state{background:#7C5CD6;}
+.lx-body{padding:6px 22px 24px;}
+.lx-body:not([hidden]){animation:lxOpen .3s ease;}
+@keyframes lxOpen{from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:none;}}
+.lx-body .cheat{margin:0; padding:0; border:0; border-radius:0; box-shadow:none; background:none; overflow:visible;}
+.lx-body .cheat::before{display:none;}
+.app.mobile-mode .lx-btn{padding:20px 14px 14px; gap:12px;}
+.app.mobile-mode .lx-title{font-size:18px;}
+.app.mobile-mode .lx-state{padding:8px 10px;}
+.app.mobile-mode .lx-state-text{display:none;}
+.app.mobile-mode .lx-body{padding:4px 14px 18px;}
+.app.mobile-mode .lx-body .cheat{padding:0;}
+@media (prefers-reduced-motion: reduce){ .lx-body:not([hidden]){animation:none;} .lx-chev, .lx-drop, .lx-state{transition:none;} }
