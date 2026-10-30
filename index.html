@@ -27,6 +27,10 @@
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><path d="M4 11.5L12 4l8 7.5M6 10v9a1 1 0 001 1h3v-6h4v6h3a1 1 0 001-1v-9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Home
       </button>
+      <button data-page="game">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><rect x="2.5" y="7" width="19" height="11" rx="5.5" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 10.5v4M5.5 12.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="15.6" cy="11.6" r="1.1" fill="currentColor"/><circle cx="18.1" cy="13.8" r="1.1" fill="currentColor"/></svg>
+        Game
+      </button>
       <button data-page="profile">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 19.5c1.2-3.5 4-5.5 7-5.5s5.8 2 7 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         Profile
@@ -83,7 +87,7 @@
               <p>Which class are you in? Your teacher uses this to follow your progress.</p>
             </div>
           </div>
-          <div class="cp-options" role="radiogroup" aria-label="Class section"></div>
+          <div class="cp-options" role="group" aria-label="Class section"></div>
           <div class="cp-note" role="status" aria-live="polite"></div>
         </div>
 
@@ -101,7 +105,11 @@
             <div class="wu-question" id="wuQuestion" role="group">…</div>
             <div class="wu-options" id="wuOptions"></div>
             <div class="wu-feedback" id="wuFeedback">Pick an answer to start your streak!</div>
-            <button class="wu-next" id="wuNext" onclick="newWarmup()">Next question →</button>
+            <div class="wu-actions">
+              <button class="wu-sol-btn" id="wuSolBtn" type="button" onclick="toggleWarmupSolution()" aria-expanded="false" aria-controls="wuSolution">💡 Show solution</button>
+              <button class="wu-next" id="wuNext" onclick="newWarmup()">Next question →</button>
+            </div>
+            <div class="wu-solution" id="wuSolution" hidden aria-live="polite"></div>
           </div>
 
           <!-- Streak calendar -->
@@ -151,7 +159,7 @@
             <h3 class="res-title" id="resTitle">Binary to Decimal</h3>
           </div>
         </div>
-        <p class="res-intro">Read the quick lesson, then try the challenge below.</p>
+        <p class="res-intro">Read the quick lesson. When you are ready, play the mini game at the bottom.</p>
         <!-- Video cards for a topic go inside this container (website.js shows the set whose id matches a topic's `staticId`). -->
         <div id="resStaticVideos">
           <div class="res-video-set" id="vid-conv-bin-hex_easy" hidden>
@@ -207,6 +215,44 @@
             <button class="res-bar-btn left" onclick="goBackToTopics()">← Back to Levels</button>
           </div>
           <button class="res-bar-btn right" id="resNextBtn" onclick="goNextTopic()">Next Level →</button>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ============ GAME PAGE: Choose topic -> Difficulty -> Problem / Input / Sketch ============ -->
+    <section class="page" id="page-game">
+      <!-- Step 1: choose a topic (cards are built by renderGameTopics() in website.js) -->
+      <div class="gm-step active" id="gm-topics">
+        <div class="section-label" style="margin-top:0;"><h3>Mini Game</h3></div>
+        <p class="level-intro">Pick a topic, choose Easy, Medium or Hard, then solve the problems. A sketchpad is right there for your working out.</p>
+        <div id="gmTopicGroups"></div>
+      </div>
+
+      <!-- Step 2: choose Easy / Medium / Hard (built by gameOpenFamily() in website.js) -->
+      <div class="gm-step" id="gm-levels">
+        <div id="gmLevelsBody"></div>
+        <button class="lecture-action-btn" style="margin-top:24px;" onclick="gameBackToTopicList()">← Back</button>
+      </div>
+
+      <!-- Step 3: play. The problem and answer box (#gameMount) and the sketchpad (#sketchMount) are filled in by website.js -->
+      <div class="gm-step" id="gm-play">
+        <button class="res-back-btn" onclick="gameBackToPick()">← Back</button>
+        <div class="res-header">
+          <span class="res-badge" id="gmBadge">2→10</span>
+          <div>
+            <div class="res-eyebrow" id="gmEyebrow">Binary Arithmetic</div>
+            <h3 class="res-title" id="gmTitle">Binary Addition</h3>
+          </div>
+        </div>
+        <div id="gameMount"></div>
+        <div id="sketchMount"></div>
+        <div class="res-bottom-bar">
+          <div class="res-bar-group">
+            <button class="res-bar-btn left" onclick="gameBackToPick()">← Change level</button>
+            <button class="res-bar-btn left" onclick="gameOpenLesson()">📖 Open lesson</button>
+          </div>
+          <button class="res-bar-btn right" id="gmNextBtn" onclick="gameNextLevel()">Next Level →</button>
         </div>
       </div>
     </section>
@@ -290,7 +336,7 @@
               <p>Which class are you in? Your teacher uses this to follow your progress.</p>
             </div>
           </div>
-          <div class="cp-options" role="radiogroup" aria-label="Class section"></div>
+          <div class="cp-options" role="group" aria-label="Class section"></div>
           <div class="cp-note" role="status" aria-live="polite"></div>
         </div>
         </div>
@@ -362,6 +408,7 @@
   <!-- BOTTOM NAV (mobile) -->
   <div class="bottom-nav" id="bottomNav">
     <button data-page="home" class="active">🏠<span>Home</span></button>
+    <button data-page="game">🎮<span>Game</span></button>
     <button data-page="profile">👤<span>Profile</span></button>
     <button data-page="admin" id="adminBottomNavBtn" style="display:none;">🛡️<span>Admin</span></button>
   </div>
