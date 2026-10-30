@@ -1182,7 +1182,7 @@ const LEVELS = {
   arith: {
     name: 'Binary Arithmetic', short: 'Arithmetic', sym: '\u00B1', tone: 'a',
     desc: 'Add, subtract, multiply and divide binary numbers.',
-    intro: 'Four topics. Open one to pick Easy, Medium or Hard.',
+    intro: 'Pick a topic.',
     groups: [
       { label: 'Addition and subtraction',   tone: 'a', ops: ['add', 'sub'] },
       { label: 'Multiplication and division', tone: 'b', ops: ['mul', 'div'] }
@@ -1191,7 +1191,7 @@ const LEVELS = {
   conv: {
     name: 'Binary Conversion', short: 'Conversion', sym: '\u21C4', tone: 'c',
     desc: 'Change numbers between binary, decimal, octal and hexadecimal.',
-    intro: 'Six topics. Open one to pick Easy, Medium or Hard.',
+    intro: 'Pick a topic.',
     groups: CONV_GROUPS.map(g => ({ label: g.label, tone: g.tone, families: g.items.map(it => buildConvFamily(it.k)) }))
   }
 };
@@ -1205,14 +1205,11 @@ function renderSections(){
   if(!el) return;
   el.innerHTML = SECTION_ORDER.map(op => {
     const L = LEVELS[op];
-    const fams = familiesOf(op);
     return `
       <button class="sec-card sec-${L.tone}" onclick="chooseLevel('${op}')">
         <span class="sec-symbol" aria-hidden="true">${L.sym}</span>
         <span class="sec-body">
           <span class="sec-name">${L.name}</span>
-          <span class="sec-desc">${L.desc}</span>
-          <span class="sec-meta">${fams.length} topics</span>
         </span>
         <span class="topic-arrow">\u2192</span>
       </button>`;
@@ -1248,10 +1245,6 @@ function topicGroupsHtml(levelKey, pickFn){
           <span class="topic-icon${f.small ? ' topic-icon-sm' : ''}">${escapeHtml(f.icon)}</span>
           <span class="topic-text">
             <span class="topic-title">${escapeHtml(f.title)}</span>
-            <span class="topic-sub">${escapeHtml(f.sub)}</span>
-            <span class="topic-meta">
-              ${DIFFS.map(lv => `<span class="topic-mix mix-${lv}"><i></i>${DIFF_NAME[lv]}</span>`).join('')}
-            </span>
           </span>
           <span class="topic-arrow">\u2192</span>
         </button>`).join('')}
@@ -2213,12 +2206,15 @@ function csBitSend(btn){
 }
 
 /* ----- Whole cheat sheet ----- */
-function renderCheat(topic){
+function cheatSheetTitle(kind){
+  return kind === 'place' ? 'Place values of a binary number' : kind === 'oct' ? 'Octal: digits and place values' : 'Hexadecimal: digits and place values';
+}
+function renderCheat(topic, withHead){
   const kind = topic.lesson.ref;
   const ck = topic.ck || topic.key;
   const item = CONV_GROUPS.flatMap(g => g.items).find(x => ck === x.k || ck.endsWith('-' + x.k));
   const opKey = (ck.split('-')[0]), op = ARITH[opKey] ? opKey : null;
-  const title = kind === 'place' ? 'Place values of a binary number' : kind === 'oct' ? 'Octal: digits and place values' : 'Hexadecimal: digits and place values';
+  const title = cheatSheetTitle(kind);
   const tabs = [
     { id:'explore', icon:'\uD83D\uDD0D', label:'Explore' },
     ...(op ? [{ id:'op', icon:ARITH[op].sym, label:ARITH[op].name }] : []),
@@ -2230,7 +2226,7 @@ function renderCheat(topic){
   const tabBtns = tabs.map((t, i) => `<button type="button" role="tab" class="cs-tab ${i === 0 ? 'on' : ''}" data-tab="${t.id}" aria-selected="${i === 0}" onclick="csTab(this)"><span aria-hidden="true">${t.icon}</span> ${t.label}</button>`).join('');
   return `
     <div class="cheat" data-kind="${kind}">
-      <div class="cs-head"><span class="cs-badge" aria-hidden="true">\uD83D\uDCD2</span><div><div class="game-eyebrow">Cheat sheet</div><h4 class="cs-title">${title}</h4></div></div>
+      ${withHead === false ? '' : `<div class="cs-head"><span class="cs-badge" aria-hidden="true">\uD83D\uDCD2</span><div><div class="game-eyebrow">Cheat sheet</div><h4 class="cs-title">${title}</h4></div></div>`}
       <div class="cs-tabs" role="tablist">${tabBtns}</div>
       <div class="cs-pane" data-pane="explore" role="tabpanel">${csExploreFrame(kind)}</div>
       ${op ? `<div class="cs-pane" data-pane="op" role="tabpanel" hidden>${csOpPane(op, item ? item.from : 2)}</div>` : ''}
@@ -2253,30 +2249,53 @@ function renderLesson(topic){
   const L = topic.lesson;
   const steps = L.steps.map((t, i) => `<li><span class="ls-num">${i + 1}</span><span>${escapeHtml(t)}</span></li>`).join('');
   const lines = L.exLines.map(t => `<div class="ex-line">${escapeHtml(t)}</div>`).join('');
+  // Both parts start CLOSED so the page is not crowded. Tapping a button opens or closes its part (see lxToggle).
   return `
-    <div class="lesson-card">
-      <div class="lesson-head">
-        <span class="lesson-badge">📘</span>
-        <div>
-          <div class="game-eyebrow">Quick lesson</div>
-          <h3 class="game-title">${escapeHtml(L.title)}</h3>
+    <div class="lx-stack">
+      <section class="lx-drop lx-lesson">
+        <button type="button" class="lx-btn" id="lxBtnLesson" aria-expanded="false" aria-controls="lxBodyLesson" onclick="lxToggle(this)">
+          <span class="lx-badge" aria-hidden="true">\uD83D\uDCD8</span>
+          <span class="lx-txt"><span class="game-eyebrow">Quick lesson</span><span class="lx-title">${escapeHtml(L.title)}</span></span>
+          <span class="lx-state"><span class="lx-state-text">Show</span><span class="lx-chev" aria-hidden="true">\u25BE</span></span>
+        </button>
+        <div class="lx-body" id="lxBodyLesson" role="region" aria-labelledby="lxBtnLesson" hidden>
+          <div class="lesson-idea">${escapeHtml(L.idea)}</div>
+          <div class="lesson-cols">
+            <div class="lesson-panel">
+              <h5>Steps</h5>
+              <ol class="ls-steps">${steps}</ol>
+            </div>
+            <div class="lesson-panel lesson-example">
+              <h5>${escapeHtml(L.exTitle)}</h5>
+              ${lines}
+              <div class="ex-answer">\u2705 ${escapeHtml(L.exAnswer)}</div>
+            </div>
+          </div>
+          <div class="lesson-tip"><span>\uD83D\uDCA1</span><p>${escapeHtml(L.tip)}</p></div>
         </div>
-      </div>
-      <div class="lesson-idea">${escapeHtml(L.idea)}</div>
-      <div class="lesson-cols">
-        <div class="lesson-panel">
-          <h5>Steps</h5>
-          <ol class="ls-steps">${steps}</ol>
+      </section>
+      <section class="lx-drop lx-cheat">
+        <button type="button" class="lx-btn" id="lxBtnCheat" aria-expanded="false" aria-controls="lxBodyCheat" onclick="lxToggle(this)">
+          <span class="lx-badge" aria-hidden="true">\uD83D\uDCD2</span>
+          <span class="lx-txt"><span class="game-eyebrow">Cheat sheet</span><span class="lx-title">${escapeHtml(cheatSheetTitle(L.ref))}</span></span>
+          <span class="lx-state"><span class="lx-state-text">Show</span><span class="lx-chev" aria-hidden="true">\u25BE</span></span>
+        </button>
+        <div class="lx-body" id="lxBodyCheat" role="region" aria-labelledby="lxBtnCheat" hidden>
+          ${renderCheat(topic, false)}
         </div>
-        <div class="lesson-panel lesson-example">
-          <h5>${escapeHtml(L.exTitle)}</h5>
-          ${lines}
-          <div class="ex-answer">✅ ${escapeHtml(L.exAnswer)}</div>
-        </div>
-      </div>
-      ${renderCheat(topic)}
-      <div class="lesson-tip"><span>💡</span><p>${escapeHtml(L.tip)}</p></div>
+      </section>
     </div>`;
+}
+// Opens or closes one dropdown on the lesson page. It does not move the page.
+function lxToggle(btn){
+  const body = document.getElementById(btn.getAttribute('aria-controls'));
+  if(!body) return;
+  const open = body.hidden;                       // it is hidden now, so this tap opens it
+  body.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  btn.querySelector('.lx-state-text').textContent = open ? 'Hide' : 'Show';
+  btn.closest('.lx-drop').classList.toggle('open', open);
+  if(open){ const ex = body.querySelector('.cs-pane[data-pane="examples"]:not([hidden])'); if(ex) csExFit(ex); }
 }
 
 /* ================= ACTIVITY LOG + ADMIN DASHBOARD ================= */
@@ -3172,7 +3191,6 @@ function sketchInit(topic){
           <span id="skMaxTxt">Maximize</span>
         </button>
       </div>
-      <div class="game-cta"><span>🧮</span><p>Work out your ${escapeHtml(topic.title.toLowerCase())} problems here: write the numbers, draw groups, or try a method. Use a finger, pen or mouse. Pinch with two fingers to zoom and move around.</p></div>
 
       <div class="sk-toolbar">
         <div class="sk-group">
