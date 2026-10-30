@@ -2745,20 +2745,21 @@ function renderGame(){
 
   let body;
   if(picking){
-    const cards = Object.keys(GAME_LEVELS).map(key => {
-      const L = GAME_LEVELS[key];
+    const cards = Object.keys(GAME_LEVELS).map((key, i) => {
+      const L = GAME_LEVELS[key], U = LEVEL_UI[key];
       const n = s.bank.filter(x => x.level === key).length;
       return `
-        <button class="game-level-card ${L.cls}" onclick="gameStartLevel('${key}')" ${n ? '' : 'disabled'}>
-          <span class="gl-emoji">${L.emoji}</span>
-          <span class="gl-name">${L.label}</span>
-          <span class="gl-desc">${L.desc}</span>
-          <span class="gl-go">Play →</span>
+        <button type="button" class="dp-card dp-${key}" style="--i:${i};" onclick="gameStartLevel('${key}')" ${n ? '' : 'disabled'} aria-label="${L.label} level">
+          <span class="dp-orb" aria-hidden="true"></span>
+          <span class="dp-name">${L.label}</span>
+          <span class="dp-desc">${L.desc}</span>
+          <span class="dp-meter" aria-hidden="true">${[1, 2, 3].map(b => `<i class="${b <= U.bars ? 'on' : ''}"></i>`).join('')}</span>
+          <span class="dp-play">Start <b>→</b></span>
         </button>`;
     }).join('');
     body = `
-      <div class="game-levels-title">Choose your difficulty</div>
-      <div class="game-level-grid">${cards}</div>`;
+      <h4 class="dp-title">Choose your difficulty</h4>
+      <div class="dp-grid">${cards}</div>`;
   } else if(finished){
     const p = total ? Math.round(s.score / total * 100) : 0;
     const emoji = p === 100 ? '🏆' : p >= 80 ? '🎉' : p >= 50 ? '👏' : '💪';
