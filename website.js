@@ -22,34 +22,32 @@ const CLOUDINARY_UPLOAD_PRESET = "gen_uploads";
 const modules = [];
 
 /* ---------- NAV ---------- */
-function goToPage(name){
+// Router state: the address bar (#hash) always says where the student is, so refreshing keeps them on the same screen.
+let _routing = false, pendingAdminRoute = false;
+const learnCtx = { level:null, family:null }, gameCtx = { level:null, family:null };
+
+function goToPage(name, noSync){
+  sketchResetMax();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   if(name === 'admin') loadAdminDashboard();
-  if(name !== 'home') stopAllLessonVideos();
-  if(name === 'game') gameHubEnter();
   document.querySelectorAll('#navLinks button, #bottomNav button').forEach(b=>{
     b.classList.toggle('active', b.dataset.page===name);
   });
+  if(!noSync) routeSync();
 }
 document.querySelectorAll('#navLinks button, #bottomNav button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    if(btn.dataset.page === 'home') goHome();
-    else if(btn.dataset.page === 'game') goGame();
-    else goToPage(btn.dataset.page);
+    const p = btn.dataset.page;
+    if(p === 'home') goHome();
+    else if(p === 'game') openGamePage();
+    else goToPage(p);
   });
 });
 
-// Takes the student to the Game page, back to its first screen (choose a topic), the same way Home works
-function goGame(){
-  goToPage('game');
-  showGameStep('topics');
-  window.scrollTo({top:0, behavior:'smooth'});
-}
-
 // Takes the student to the Home page, back to its first screen (works from any page or lesson)
 function goHome(){
-  goToPage('home');
+  goToPage('home', true);
   showWizardStep('welcome');
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -238,25 +236,37 @@ function profileAction(){
   else signInWithGoogle();
 }
 
-/* ================= CLASS SECTION (ICT - A / ICT - B) =================
+/* ================= CLASS SECTION (ICT - 1 / ICT - 2) =================
    Students pick the class they belong to (Home page and Profile page). It is saved on their account as
    users/{uid}.classSection, so the Admin tab can group students by section and show each section's recent activity.
-   To add another class later, just add it to this list, for example 'ICT - C'. */
-const CLASS_SECTIONS = ['ICT - A', 'ICT - B'];
+   To add another class later, just add it to this list, for example 'ICT - 3'. */
+const CLASS_SECTIONS = ['ICT - 1', 'ICT - 2', 'Others'];
+// The sections used to be called ICT - A and ICT - B. Students who already picked one of those are moved to the new name automatically.
+const CLASS_LEGACY = { 'ICT - A':'ICT - 1', 'ICT - B':'ICT - 2' };
+function classNormalize(v){ return Object.prototype.hasOwnProperty.call(CLASS_LEGACY, v) ? CLASS_LEGACY[v] : v; }
 const CLASS_PENDING_KEY = 'bitsClassSectionPending';   // only used when a student picks BEFORE signing in
 let classSection = null;
 
-function classPendingGet(){ try{ const v = localStorage.getItem(CLASS_PENDING_KEY); return CLASS_SECTIONS.indexOf(v) >= 0 ? v : null; }catch(_){ return null; } }
+function classPendingGet(){ try{ const v = classNormalize(localStorage.getItem(CLASS_PENDING_KEY)); return CLASS_SECTIONS.indexOf(v) >= 0 ? v : null; }catch(_){ return null; } }
 function classPendingSet(v){ try{ if(v) localStorage.setItem(CLASS_PENDING_KEY, v); else localStorage.removeItem(CLASS_PENDING_KEY); }catch(_){} }
+
+// Computer icon used on the ICT class buttons (inline SVG so it follows the theme colors)
+const CP_PC_ICON = '<svg class="cp-pc" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" focusable="false">'
+  + '<rect class="pc-bezel" x="2.5" y="3.5" width="27" height="19" rx="4"/>'
+  + '<rect class="pc-screen" x="5.2" y="6.2" width="21.6" height="13.6" rx="2.2"/>'
+  + '<path class="pc-code" d="M12 10.6 9.2 13l2.8 2.4M20 10.6l2.8 2.4-2.8 2.4M17.3 9.9l-2.6 6.2"/>'
+  + '<rect class="pc-stand" x="13.8" y="22.5" width="4.4" height="3"/>'
+  + '<rect class="pc-base" x="9" y="25.4" width="14" height="3" rx="1.5"/>'
+  + '</svg>';
 
 function renderClassPickers(){
   document.querySelectorAll('.class-pick').forEach(box => {
     const opts = box.querySelector('.cp-options'), note = box.querySelector('.cp-note');
     box.classList.toggle('need', !classSection);
     if(opts) opts.innerHTML = CLASS_SECTIONS.map(label => {
-      const on = label === classSection, letter = label.split(' - ').pop();
-      return `<button type="button" class="cp-opt ${on ? 'on' : ''}" aria-pressed="${on}" data-sec="${escapeHtml(label)}" onclick="setClassSection(this.dataset.sec)">
-        <span class="cp-letter" aria-hidden="true">${escapeHtml(letter)}</span>
+      const on = label === classSection, isIct = label.indexOf(' - ') >= 0, letter = isIct ? CP_PC_ICON : '\u22EF';
+      return `<button type="button" class="cp-opt ${on ? 'on' : ''}" role="radio" aria-checked="${on}" data-sec="${escapeHtml(label)}" onclick="setClassSection(this.dataset.sec)">
+        <span class="cp-letter ${isIct ? 'cp-letter-pc' : ''}" aria-hidden="true">${isIct ? letter : escapeHtml(letter)}</span>
         <span class="cp-name">${escapeHtml(label)}</span>
         <span class="cp-check" aria-hidden="true">\u2713</span>
       </button>`;
@@ -264,27 +274,22 @@ function renderClassPickers(){
     if(note){
       note.classList.remove('err');
       note.textContent = !classSection ? ''
-        : currentUser ? `\u2705 You are in ${classSection}. Tap it again to unselect it, or tap another section to change it.`
-        : `You picked ${classSection}. Tap it again to unselect it. Sign in with Google so your teacher can see your progress.`;
+        : currentUser ? `\u2705 You are in ${classSection}. Picked the wrong one? Tap another section to change it, or tap it again to unselect.`
+        : `You picked ${classSection}. Sign in with Google so your teacher can see your progress.`;
     }
   });
 }
 
-// Tapping a section chooses it. Tapping the SAME section a second time un-chooses it.
 async function setClassSection(label){
   if(CLASS_SECTIONS.indexOf(label) < 0) return;
+  // Tapping the section you already picked un-chooses it
+  const clearing = (label === classSection), next = clearing ? null : label;
   const prev = classSection;
-  const next = (label === classSection) ? null : label;
   classSection = next; renderClassPickers();
   if(!currentUser){ classPendingSet(next); return; }
   try{
-    if(next){
-      await db.collection('users').doc(currentUser.uid).set({ classSection: next, classSectionAt: Date.now() }, {merge:true});
-      logActivity('class_selected', prev ? `${next} (was ${prev})` : next, { classSection: next });
-    } else {
-      await db.collection('users').doc(currentUser.uid).set({ classSection: firebase.firestore.FieldValue.delete(), classSectionAt: Date.now() }, {merge:true});
-      logActivity('class_cleared', prev, { classSection: null });
-    }
+    await db.collection('users').doc(currentUser.uid).set({ classSection: next, classSectionAt: Date.now() }, {merge:true});
+    logActivity(clearing ? 'class_cleared' : 'class_selected', clearing ? `${prev} (cleared)` : (prev ? `${label} (was ${prev})` : label), { classSection: next });
   }catch(err){
     console.error(err);
     classSection = prev; renderClassPickers();
@@ -294,9 +299,13 @@ async function setClassSection(label){
 
 // Called right after a student signs in: use the saved section, or save the one they picked before signing in.
 function classSectionOnSignIn(data){
-  const saved = data && CLASS_SECTIONS.indexOf(data.classSection) >= 0 ? data.classSection : null;
+  const raw = data ? data.classSection : null, saved = CLASS_SECTIONS.indexOf(classNormalize(raw)) >= 0 ? classNormalize(raw) : null;
   const pending = classPendingGet();
-  if(saved){ classSection = saved; classPendingSet(null); }
+  if(saved){
+    classSection = saved; classPendingSet(null);
+    // saved under the old name (ICT - A / ICT - B): quietly update the account so the teacher's Admin tab matches
+    if(raw !== saved && currentUser) db.collection('users').doc(currentUser.uid).set({ classSection: saved }, {merge:true}).catch(console.error);
+  }
   else if(pending){
     classSection = pending; classPendingSet(null);
     db.collection('users').doc(currentUser.uid).set({ classSection: pending, classSectionAt: Date.now() }, {merge:true})
@@ -698,18 +707,10 @@ function toggleNotifications(){
 */
 
 /* ================= HOME PAGE FLOW: Start Learning -> pick a level -> quiz ================= */
-// Hides every YouTube lesson card and unloads its player so nothing keeps playing in the background.
-function stopAllLessonVideos(){
-  document.querySelectorAll('#resStaticVideos > *').forEach(el => {
-    el.hidden = true;
-    el.querySelectorAll('iframe').forEach(f => f.removeAttribute('src'));
-  });
-}
-
 function showWizardStep(stepName){
-  if(stepName !== 'resources') stopAllLessonVideos();
   document.querySelectorAll('.wizard-step').forEach(s=>s.classList.remove('active'));
   document.getElementById('step-' + stepName).classList.add('active');
+  routeSync();
 }
 
 // MINI GAME FORMAT (each topic has a `game:{ questions:[] }` slot):
@@ -1052,7 +1053,6 @@ function buildArithTopic(op, diff){
       : `Work out the ${O.result} of these binary numbers and write it in binary.`;
     return {
       level: diff, q, num: `${arFmt(a, 2)} ${O.show} ${arFmt(b, 2)}`, expr: true,
-      v: { a: arFmt(a, 2), b: arFmt(b, 2), sym: O.show, op },
       from: 2, to: 2, base: 2, answer: arFmt(res, 2), solution: arithSolution(op, a, b, res, 2, 2)
     };
   });
@@ -1182,7 +1182,7 @@ const LEVELS = {
   arith: {
     name: 'Binary Arithmetic', short: 'Arithmetic', sym: '\u00B1', tone: 'a',
     desc: 'Add, subtract, multiply and divide binary numbers.',
-    intro: 'Pick a topic.',
+    intro: 'Four topics. Open one to pick Easy, Medium or Hard.',
     groups: [
       { label: 'Addition and subtraction',   tone: 'a', ops: ['add', 'sub'] },
       { label: 'Multiplication and division', tone: 'b', ops: ['mul', 'div'] }
@@ -1191,7 +1191,7 @@ const LEVELS = {
   conv: {
     name: 'Binary Conversion', short: 'Conversion', sym: '\u21C4', tone: 'c',
     desc: 'Change numbers between binary, decimal, octal and hexadecimal.',
-    intro: 'Pick a topic.',
+    intro: 'Six topics. Open one to pick Easy, Medium or Hard.',
     groups: CONV_GROUPS.map(g => ({ label: g.label, tone: g.tone, families: g.items.map(it => buildConvFamily(it.k)) }))
   }
 };
@@ -1199,21 +1199,26 @@ function familiesOf(levelKey){ return LEVELS[levelKey].groups.flatMap(g => g.fam
 function allTopicsOf(levelKey){ return familiesOf(levelKey).flatMap(f => f.topics); }
 function familyOf(levelKey, topicKey){ return familiesOf(levelKey).find(f => f.topics.some(t => t.key === topicKey)); }
 
-// The two section cards on the "Choose a section" screen.
-function renderSections(){
-  const el = document.getElementById('sectionGrid');
-  if(!el) return;
-  el.innerHTML = SECTION_ORDER.map(op => {
+// The section cards (Binary Arithmetic / Binary Conversion). `handler` is the function that runs when a card is tapped.
+function sectionCardsHtml(handler){
+  return SECTION_ORDER.map(op => {
     const L = LEVELS[op];
+    const fams = familiesOf(op);
     return `
-      <button class="sec-card sec-${L.tone}" onclick="chooseLevel('${op}')">
+      <button class="sec-card sec-${L.tone}" onclick="${handler}('${op}')">
         <span class="sec-symbol" aria-hidden="true">${L.sym}</span>
         <span class="sec-body">
           <span class="sec-name">${L.name}</span>
+          <span class="sec-meta">${fams.length} topics</span>
         </span>
         <span class="topic-arrow">\u2192</span>
       </button>`;
   }).join('');
+}
+function renderSections(){
+  const el = document.getElementById('sectionGrid');
+  if(!el) return;
+  el.innerHTML = sectionCardsHtml('chooseLevel');
 }
 renderSections();
 
@@ -1229,23 +1234,20 @@ function chooseLevel(levelKey){
   if(currentUser){
     db.collection('users').doc(currentUser.uid).set({level: level.name}, {merge:true}).catch(console.error);
   }
+  learnCtx.level = levelKey; learnCtx.family = null;
   renderTopics(levelKey);
   showWizardStep('topics');
 }
 
-// Topic cards, grouped under labels (Binary and decimal, Binary and octal, ...).
-// `pickFn` is the name of the function a card calls when it is tapped (the lessons and the Game page each use their own).
-function topicGroupsHtml(levelKey, pickFn){
-  const level = LEVELS[levelKey];
-  return level.groups.map(group => `
+// Topic cards, grouped under labels (Binary and decimal, Binary and octal, ...). Just the topic name, nothing else.
+function topicGroupsHtml(levelKey, handler){
+  return LEVELS[levelKey].groups.map(group => `
     <div class="topic-group-label tone-${group.tone}"><span class="tg-dot"></span>${escapeHtml(group.label)}</div>
     <div class="topic-grid topic-grid-wide">
       ${group.families.map(f => `
-        <button class="topic-card tone-${group.tone}" onclick="${pickFn}('${levelKey}', '${f.key}')">
+        <button class="topic-card tone-${group.tone}" onclick="${handler}('${levelKey}', '${f.key}')">
           <span class="topic-icon${f.small ? ' topic-icon-sm' : ''}">${escapeHtml(f.icon)}</span>
-          <span class="topic-text">
-            <span class="topic-title">${escapeHtml(f.title)}</span>
-          </span>
+          <span class="topic-text"><span class="topic-title">${escapeHtml(f.title)}</span></span>
           <span class="topic-arrow">\u2192</span>
         </button>`).join('')}
     </div>`).join('');
@@ -1253,20 +1255,21 @@ function topicGroupsHtml(levelKey, pickFn){
 function renderTopics(levelKey){
   const level = LEVELS[levelKey];
   document.getElementById('topicsHeading').textContent = level.name;
-  const intro = document.getElementById('topicsIntro'); if(intro && level.intro) intro.textContent = level.intro;
   document.getElementById('topicGroups').innerHTML = topicGroupsHtml(levelKey, 'openFamily');
 }
 
-// The "Choose your difficulty" screen (Easy / Medium / Hard) for one topic.
-// `pickFn` is the function a level card calls: openTopic (lesson) or gamePlay (Game page).
+// Topic card clicked: show the "Choose your difficulty" screen (Easy / Medium / Hard).
 const LEVEL_UI = {
   easy:   { desc: 'Warm-up questions to get you started', bars: 1 },
   medium: { desc: 'A bit trickier. Time to think!',        bars: 2 },
   hard:   { desc: 'Challenge mode for math champions',     bars: 3 }
 };
-function familyLevelsHtml(levelKey, fam, pickFn){
+function openFamily(levelKey, familyKey){
+  const fam = familiesOf(levelKey).find(f => f.key === familyKey);
+  if(!fam) return;
+  learnCtx.level = levelKey; learnCtx.family = familyKey;
   const level = LEVELS[levelKey];
-  return `
+  document.getElementById('levelsBody').innerHTML = `
     <div class="res-header">
       <span class="res-badge${fam.icon.length >= 3 ? ' res-badge-sm' : ''}">${escapeHtml(fam.icon)}</span>
       <div>
@@ -1276,28 +1279,22 @@ function familyLevelsHtml(levelKey, fam, pickFn){
     </div>
     <div class="dp-banner">
       <span class="dp-rocket" aria-hidden="true">\uD83D\uDE80</span>
-      <p>Think you can master <b>${escapeHtml(fam.title)}</b>? Pick a level, beat your best score, and tap Show solution whenever you're stuck!</p>
+      <p>Pick a level for <b>${escapeHtml(fam.title)}</b> to open its lesson and mini game.</p>
     </div>
     <h4 class="dp-title">Choose your difficulty</h4>
     <div class="dp-grid">
       ${fam.topics.map((t, i) => {
         const U = LEVEL_UI[t.diff];
         return `
-        <button type="button" class="dp-card dp-${t.diff}" style="--i:${i};" onclick="${pickFn}('${levelKey}', '${t.key}')" aria-label="${DIFF_NAME[t.diff]} level: ${escapeHtml(fam.title)}">
+        <button type="button" class="dp-card dp-${t.diff}" style="--i:${i};" onclick="openTopic('${levelKey}', '${t.key}')" aria-label="${DIFF_NAME[t.diff]} level: ${escapeHtml(fam.title)}">
           <span class="dp-orb" aria-hidden="true"></span>
           <span class="dp-name">${DIFF_NAME[t.diff]}</span>
           <span class="dp-desc">${U.desc}</span>
           <span class="dp-meter" aria-hidden="true">${[1, 2, 3].map(n => `<i class="${n <= U.bars ? 'on' : ''}"></i>`).join('')}</span>
-          <span class="dp-play">Play <b>\u2192</b></span>
+          <span class="dp-play">Start <b>\u2192</b></span>
         </button>`;
       }).join('')}
     </div>`;
-}
-// Topic card clicked (lessons): show its Easy / Medium / Hard screen.
-function openFamily(levelKey, familyKey){
-  const fam = familiesOf(levelKey).find(f => f.key === familyKey);
-  if(!fam) return;
-  document.getElementById('levelsBody').innerHTML = familyLevelsHtml(levelKey, fam, 'openTopic');
   showWizardStep('levels');
   window.scrollTo({ top:0, behavior:'smooth' });
 }
@@ -1347,7 +1344,21 @@ function showTopicResources(levelKey, topic){
   const badge = document.getElementById('resBadge');
   badge.textContent = topic.icon;
   badge.classList.toggle('res-badge-sm', topic.icon.length >= 3);
-  document.getElementById('resEyebrow').textContent = level.name + (topic.diff ? ' \u00B7 ' + DIFF_NAME[topic.diff] : '');
+  document.getElementById('resEyebrow').textContent = level.name;
+  {
+    // Big coloured difficulty badge, with a little pop every time a lesson opens, so students can see the level really changed.
+    const dEl = document.getElementById('resDiff');
+    document.getElementById('resTop').dataset.diff = topic.diff || '';
+    if(dEl){
+      if(topic.diff){
+        const L = GAME_LEVELS[topic.diff];
+        dEl.className = 'res-diff diff-' + topic.diff;
+        dEl.textContent = L.emoji + ' ' + L.label + ' level';
+        dEl.hidden = false;
+        void dEl.offsetWidth; dEl.classList.add('pop');
+      } else dEl.hidden = true;
+    }
+  }
   document.getElementById('resTitle').textContent = topic.title;
 
   const ICONS = {
@@ -1355,61 +1366,28 @@ function showTopicResources(levelKey, topic){
     quiz:'<svg viewBox="0 0 24 24" fill="none"><rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 9l1.5 1.5L14 7M9 15h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
   };
   const resources = topic.resources || [];
-  const video = resources.find(r=>r.type==='video');
   const others = resources.filter(r=>r.type!=='video');
-
-  // YouTube video cards live in binary-portal.html (#resStaticVideos): stop & hide them all, then show this topic's set.
-  stopAllLessonVideos();
-  {
-    const el = document.getElementById((video && video.staticId) ? video.staticId : 'vid-' + levelKey + '-' + topic.key);
-    if(el){
-      el.hidden = false;
-      el.querySelectorAll('iframe[data-src]').forEach(f => { f.src = f.dataset.src; });
-    }
-  }
-
-  const videoHtml = (video && !video.staticId) ? `
-    <div class="res-video-card${video.portrait ? ' portrait' : ''}">
-      <div class="res-video-frame">
-        ${video.file
-          ? `<video controls playsinline preload="metadata" src="${escapeHtml(video.file)}"
-               onloadedmetadata="this.closest('.res-video-card').classList.toggle('portrait', this.videoHeight > this.videoWidth)"
-               onerror="this.nextElementSibling.style.display='flex'">
-               Your browser can't play this video.
-             </video>
-             <div class="res-video-error">
-               <span>⚠️</span>
-               <b>Video not found</b>
-               <p>Put the file here:<br><code>${escapeHtml(video.file)}</code><br>(next to binary-portal.html)</p>
-             </div>`
-          : `<iframe src="https://www.youtube-nocookie.com/embed/${escapeHtml(video.videoId)}" title="${escapeHtml(video.title)}"
-               loading="lazy" allow="accelerometer; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`}
-      </div>
-      <div class="res-video-info">
-        <span class="res-tag tag-video">Step 1</span>
-        <h4>${escapeHtml(video.title)}</h4>
-        <p class="res-summary-label">📝 What it's about</p>
-        <p>${escapeHtml(video.desc)}</p>
-        ${video.file
-          ? (video.duration ? `<span class="res-duration">⏱ ${escapeHtml(video.duration)} lesson</span>` : '')
-          : `<a class="res-link-btn" href="${escapeHtml(video.url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>`}
-      </div>
-    </div>` : '';
 
   const cardsHtml = others.map((r,i)=>`
     <a class="res-card res-${r.type}" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">
       <span class="res-card-icon">${ICONS[r.type] || ''}</span>
-      <span class="res-tag tag-${r.type}">Step ${i + (video ? 2 : 1)}</span>
+      <span class="res-tag tag-${r.type}">Step ${i + 1}</span>
       <span class="res-card-title">${escapeHtml(r.title)}</span>
       <span class="res-card-desc">${escapeHtml(r.desc)}</span>
       <span class="res-card-cta">${escapeHtml(r.cta || 'Open')} <span>→</span></span>
     </a>`).join('');
 
   document.getElementById('resBody').innerHTML = resources.length
-    ? videoHtml + (cardsHtml ? `<div class="res-grid">${cardsHtml}</div>` : '')
+    ? (cardsHtml ? `<div class="res-grid">${cardsHtml}</div>` : '')
     : topic.lesson ? renderLesson(topic)
-    : `<div class="res-empty"><span>🚧</span><h4>Lesson materials coming soon</h4><p>The video, slides and assessment for ${escapeHtml(topic.title)} will be added here.</p></div>`;
-  document.getElementById('resBody').insertAdjacentHTML('beforeend', playCtaHtml(topic));
+    : `<div class="res-empty"><span>🚧</span><h4>Lesson materials coming soon</h4><p>The lesson and mini game for ${escapeHtml(topic.title)} will be added here.</p></div>`;
+  document.getElementById('gameBody').innerHTML = '';
+  if(!document.getElementById('gameMount')) document.getElementById('resBody').insertAdjacentHTML('beforeend', '<div id="gameMount"></div>');
+  document.getElementById('resBody').insertAdjacentHTML('beforeend', '<div id="sketchMount"></div>');
+  skProblem = null;
+  document.querySelectorAll('#resBody .cheat').forEach(csBindHints);
+  gameInit(topic);       // the mini game sits on the same page as the quick lesson and cheat sheet
+  sketchInit(topic);
   markActiveToday();
   showWizardStep('resources');
 }
@@ -1794,45 +1772,14 @@ function csExamplesPane(kind){
   list.forEach(e => { if(tags.indexOf(e.tag) < 0) tags.push(e.tag); });
   const label = { toDec:'To decimal', fromDec:'From decimal', group: kind === 'oct' ? 'Binary \u21C4 octal' : 'Binary \u21C4 hex' };
   const chips = ['all', ...tags].map((t, i) => `<button type="button" class="cs-base ${i === 0 ? 'on' : ''}" data-tag="${t}" aria-pressed="${i === 0}" onclick="csExFilter(this)">${t === 'all' ? 'All (' + list.length + ')' : label[t]}</button>`).join('');
-  return `<p class="cs-hint"><span aria-hidden="true">\uD83D\uDCDD</span> ${list.length} worked examples. Pick a type, then follow the steps.<span class="cs-scrollnote" hidden> Scroll inside the box to see them all.</span></p>
+  return `<p class="cs-hint"><span aria-hidden="true">\uD83D\uDCDD</span> ${list.length} worked examples. Pick a type, then follow the steps.</p>
     <div class="cs-bases cs-exfilter" role="group" aria-label="Filter examples">${chips}</div>
-    <div class="cs-dgrid cs-exgrid" tabindex="0" role="region" aria-label="Worked examples" onscroll="csExScroll(this)">${list.map(csExHtml).join('')}</div>`;
+    <div class="cs-dgrid cs-exgrid">${list.map(csExHtml).join('')}</div>`;
 }
-
-// HOW MANY EXAMPLES SHOW BEFORE THE BOX SCROLLS (the scrollbar is hidden). Change this number to show more or fewer.
-// On a computer the examples sit in 2 columns, so the box always ends on a full row.
-const CS_EXAMPLES_VISIBLE = 5;
-// The box is never taller than this share of the screen height, so it always fits on a phone (0.7 = 70%).
-const CS_EXAMPLES_MAX_SCREEN = 0.7;
-function csExFit(pane){
-  const grid = pane && pane.querySelector('.cs-exgrid'); if(!grid) return;
-  const note = pane.querySelector('.cs-scrollnote');
-  grid.style.maxHeight = ''; grid.classList.remove('scrolls', 'at-end'); grid.scrollTop = 0;
-  if(note) note.hidden = true;
-  const cards = Array.from(grid.querySelectorAll('.cs-excard')).filter(c => !c.hidden);
-  if(cards.length <= CS_EXAMPLES_VISIBLE || !grid.offsetParent) return;
-  const rowTop = cards[CS_EXAMPLES_VISIBLE - 1].offsetTop;
-  let edge = 0;
-  cards.forEach(c => { if(c.offsetTop <= rowTop + 1) edge = Math.max(edge, c.offsetTop + c.offsetHeight); });
-  if(edge + 40 >= grid.scrollHeight) return;                 // everything already fits
-  const wanted = Math.ceil(edge + 34);                       // the last 34px peeks at the next example
-  const cap = Math.max(260, Math.round(window.innerHeight * CS_EXAMPLES_MAX_SCREEN));
-  grid.style.maxHeight = Math.min(wanted, cap) + 'px';
-  grid.classList.add('scrolls');
-  if(note) note.hidden = false;
-  csExScroll(grid);
-}
-function csExScroll(grid){ grid.classList.toggle('at-end', grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 4); }
-let csExResizeTimer = null;
-window.addEventListener('resize', () => {
-  clearTimeout(csExResizeTimer);
-  csExResizeTimer = setTimeout(() => document.querySelectorAll('.cs-pane[data-pane="examples"]:not([hidden])').forEach(csExFit), 150);
-});
 function csExFilter(btn){
   const pane = btn.closest('.cs-pane'), tag = btn.dataset.tag;
   pane.querySelectorAll('.cs-exfilter .cs-base').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   pane.querySelectorAll('.cs-excard').forEach(c => { c.hidden = !(tag === 'all' || c.dataset.tag === tag); });
-  csExFit(pane);
 }
 
 /* ----- Practice tab: random questions, checked by the program ----- */
@@ -1860,9 +1807,10 @@ function csQuizNormalise(s, base){
   s = String(s || '').trim().toUpperCase().replace(/[\s_,]/g, '');
   return base === 10 ? s.replace(/^0+(?=.)/, '') : csTrim0(s);
 }
-function csQuizPane(){
-  const lv = Object.keys(CS_QLEVELS).map((k, i) => `<button type="button" class="cs-base ${i === 0 ? 'on' : ''}" data-level="${k}" aria-pressed="${i === 0}" onclick="csQuizLevel(this)">${CS_QLEVELS[k]}</button>`).join('');
-  return `<div class="cs-quiz" data-ready="0">
+function csQuizPane(kind, level){
+  const lvl = CS_QLEVELS[level] ? level : 'easy';
+  const lv = Object.keys(CS_QLEVELS).map((k, i) => `<button type="button" class="cs-base ${k === lvl ? 'on' : ''}" data-level="${k}" aria-pressed="${k === lvl}" onclick="csQuizLevel(this)">${CS_QLEVELS[k]}</button>`).join('');
+  return `<div class="cs-quiz" data-ready="0" data-kind="${kind}" data-start="${lvl}">
     <p class="cs-hint"><span aria-hidden="true">\uD83C\uDFAF</span> Endless practice. Every question is new, and the program checks your answer.</p>
     <div class="cs-bases" role="group" aria-label="Difficulty">${lv}</div>
     <div class="cs-qscore" aria-live="polite"><span>\u2705 Correct <b data-s="ok">0</b></span><span>\uD83D\uDCDD Tried <b data-s="all">0</b></span><span>\uD83D\uDD25 Streak <b data-s="streak">0</b></span><span>\uD83C\uDFC6 Best <b data-s="best">0</b></span></div>
@@ -1880,26 +1828,28 @@ function csQuizPane(){
   </div>`;
 }
 function csQuizState(root){
-  if(!root._s) root._s = { level:'easy', ok:0, all:0, streak:0, best:0, cur:null, done:false };
+  if(!root._s) root._s = { level:root.dataset.start || 'easy', ok:0, all:0, streak:0, best:0, cur:null, done:false };
   return root._s;
 }
 function csQuizScore(root){
   const s = csQuizState(root);
   ['ok', 'all', 'streak', 'best'].forEach(k => { const el = root.querySelector(`[data-s="${k}"]`); if(el) el.textContent = s[k]; });
 }
-function csQuizNew(root){
+function csQuizNew(root, quiet){
   if(!root) return;
-  const s = csQuizState(root), kind = root.closest('.cheat').dataset.kind;
+  const s = csQuizState(root), kind = root.dataset.kind;
   s.cur = csQuizMake(kind, s.level, s.cur); s.done = false;
   const q = s.cur, word = { 2:'binary', 8:'octal', 10:'decimal', 16:'hexadecimal' };
   root.querySelector('.cs-qask').textContent = `Convert from ${word[q.from]} to ${word[q.to]}:`;
   root.querySelector('.cs-qnum').textContent = q.from === 2 ? csGroup(q.num, 4) : q.num;
+  skProblem = { tag:'Practice', text:`Convert from ${word[q.from]} to ${word[q.to]}`, num:root.querySelector('.cs-qnum').textContent, from:q.from, to:q.to, expr:true };
+  skPaintProblem();
   const inp = root.querySelector('.cs-q-in'); inp.value = ''; inp.disabled = false; inp.classList.remove('bad', 'good');
   const fb = root.querySelector('.cs-qfb'); fb.textContent = ''; fb.className = 'cs-qfb';
   root.querySelector('.cs-qsol').innerHTML = '';
   root.querySelector('[data-act="show"]').disabled = false;
   root.dataset.ready = '1'; csQuizScore(root);
-  try{ inp.focus({ preventScroll:true }); }catch(_){}
+  if(!quiet){ try{ inp.focus({ preventScroll:true }); }catch(_){} }
 }
 function csQuizLevel(btn){
   const root = btn.closest('.cs-quiz'); csQuizState(root).level = btn.dataset.level;
@@ -2206,34 +2156,31 @@ function csBitSend(btn){
 }
 
 /* ----- Whole cheat sheet ----- */
-function cheatSheetTitle(kind){
-  return kind === 'place' ? 'Place values of a binary number' : kind === 'oct' ? 'Octal: digits and place values' : 'Hexadecimal: digits and place values';
-}
-function renderCheat(topic, withHead){
+function renderCheat(topic){
   const kind = topic.lesson.ref;
   const ck = topic.ck || topic.key;
   const item = CONV_GROUPS.flatMap(g => g.items).find(x => ck === x.k || ck.endsWith('-' + x.k));
   const opKey = (ck.split('-')[0]), op = ARITH[opKey] ? opKey : null;
-  const title = cheatSheetTitle(kind);
+  const title = kind === 'place' ? 'Place values of a binary number' : kind === 'oct' ? 'Octal: digits and place values' : 'Hexadecimal: digits and place values';
   const tabs = [
     { id:'explore', icon:'\uD83D\uDD0D', label:'Explore' },
     ...(op ? [{ id:'op', icon:ARITH[op].sym, label:ARITH[op].name }] : []),
     { id:'examples', icon:'\uD83D\uDCDD', label:'More examples' },
-    { id:'quiz', icon:'\uD83C\uDFAF', label:'Practice' },
     { id:'facts', icon:'\uD83D\uDCDA', label:'Quick facts' },
     { id:'conv', icon:'\uD83E\uDDEE', label:'Converter' }
   ];
   const tabBtns = tabs.map((t, i) => `<button type="button" role="tab" class="cs-tab ${i === 0 ? 'on' : ''}" data-tab="${t.id}" aria-selected="${i === 0}" onclick="csTab(this)"><span aria-hidden="true">${t.icon}</span> ${t.label}</button>`).join('');
   return `
     <div class="cheat" data-kind="${kind}">
-      ${withHead === false ? '' : `<div class="cs-head"><span class="cs-badge" aria-hidden="true">\uD83D\uDCD2</span><div><div class="game-eyebrow">Cheat sheet</div><h4 class="cs-title">${title}</h4></div></div>`}
-      <div class="cs-tabs" role="tablist">${tabBtns}</div>
-      <div class="cs-pane" data-pane="explore" role="tabpanel">${csExploreFrame(kind)}</div>
-      ${op ? `<div class="cs-pane" data-pane="op" role="tabpanel" hidden>${csOpPane(op, item ? item.from : 2)}</div>` : ''}
-      <div class="cs-pane" data-pane="examples" role="tabpanel" hidden>${csExamplesPane(kind)}</div>
-      <div class="cs-pane" data-pane="quiz" role="tabpanel" hidden>${csQuizPane()}</div>
-      <div class="cs-pane" data-pane="facts" role="tabpanel" hidden>${csFactsPane(kind, item)}</div>
-      <div class="cs-pane" data-pane="conv" role="tabpanel" hidden>${csConvPane(item ? item.from : 2, kind)}</div>
+      <div class="cs-tabsbar"><div class="cs-tabs" role="tablist">${tabBtns}</div></div>
+      <div class="cs-body">
+        <div class="cs-pane" data-pane="explore" role="tabpanel">${csExploreFrame(kind)}</div>
+        ${op ? `<div class="cs-pane" data-pane="op" role="tabpanel" hidden>${csOpPane(op, item ? item.from : 2)}</div>` : ''}
+        <div class="cs-pane" data-pane="examples" role="tabpanel" hidden>${csExamplesPane(kind)}</div>
+        <div class="cs-pane" data-pane="facts" role="tabpanel" hidden>${csFactsPane(kind, item)}</div>
+        <div class="cs-pane" data-pane="conv" role="tabpanel" hidden>${csConvPane(item ? item.from : 2, kind)}</div>
+        <div class="cs-more" aria-hidden="true">Scroll for more \u2193</div>
+      </div>
     </div>`;
 }
 function csTab(btn){
@@ -2241,61 +2188,92 @@ function csTab(btn){
   root.querySelectorAll('.cs-tab').forEach(t => { const on = t === btn; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
   root.querySelectorAll('.cs-pane').forEach(p => { p.hidden = p.dataset.pane !== btn.dataset.tab; });
   if(btn.dataset.tab === 'conv') csConvRun(root.querySelector('.cs-conv'));
-  if(btn.dataset.tab === 'examples') csExFit(root.querySelector('.cs-pane[data-pane="examples"]'));
-  if(btn.dataset.tab === 'quiz'){ const qz = root.querySelector('.cs-quiz'); if(qz && qz.dataset.ready !== '1') csQuizNew(qz); }
+  const tabs = root.querySelector('.cs-tabs');
+  if(tabs) tabs.scrollTo({ left: btn.offsetLeft - (tabs.clientWidth - btn.offsetWidth) / 2, behavior: skReducedMotion() ? 'auto' : 'smooth' });
+  const pane = root.querySelector('.cs-pane:not([hidden])'); if(pane) pane.scrollTop = 0;
+  csHints(root);
+}
+
+/* Cheat sheet scroll cues: the scrollbars are invisible, so a fade + "Scroll for more" pill (and an arrow on the tab row) tell students there is more inside. */
+function csHints(root){
+  if(!root) return;
+  const tabs = root.querySelector('.cs-tabs'), bar = root.querySelector('.cs-tabsbar'), body = root.querySelector('.cs-body');
+  if(tabs && bar){
+    const max = tabs.scrollWidth - tabs.clientWidth;
+    bar.classList.toggle('more-r', max > 4 && tabs.scrollLeft < max - 4);
+    bar.classList.toggle('more-l', tabs.scrollLeft > 4);
+  }
+  const pane = body && body.querySelector('.cs-pane:not([hidden])');
+  if(pane){
+    const room = pane.scrollHeight - pane.clientHeight;
+    body.classList.toggle('more', room > 6 && pane.scrollTop < room - 6);
+  }
+}
+function csBindHints(root){
+  if(!root || root._hints) return;
+  root._hints = true;
+  const upd = () => csHints(root), tabs = root.querySelector('.cs-tabs'), body = root.querySelector('.cs-body');
+  if(tabs) tabs.addEventListener('scroll', upd, { passive:true });
+  root.querySelectorAll('.cs-pane').forEach(p => p.addEventListener('scroll', upd, { passive:true }));
+  if(window.ResizeObserver) new ResizeObserver(upd).observe(root);
+  if(window.MutationObserver && body) new MutationObserver(upd).observe(body, { childList:true, subtree:true, attributes:true, attributeFilter:['hidden'] });
+  upd();
+}
+// One small nudge of the tab row the first time the cheat sheet opens, so students see the other tabs.
+function csNudge(root){
+  const tabs = root.querySelector('.cs-tabs');
+  if(!tabs || root._nudged || skReducedMotion()) return;
+  const max = tabs.scrollWidth - tabs.clientWidth;
+  if(max < 8) return;
+  root._nudged = true;
+  tabs.scrollTo({ left: Math.min(70, max), behavior:'smooth' });
+  setTimeout(() => tabs.scrollTo({ left:0, behavior:'smooth' }), 650);
+}
+
+
+function foldHtml(id, icon, title, sub, body){
+  return `
+    <div class="fold" data-fold="${id}">
+      <button type="button" class="fold-head" aria-expanded="false" onclick="foldToggle(this)">
+        <span class="fold-ico" aria-hidden="true">${icon}</span>
+        <span class="fold-text"><span class="fold-title">${title}</span><span class="fold-sub">${sub}</span></span>
+        <span class="fold-chev" aria-hidden="true"></span>
+      </button>
+      <div class="fold-body"><div class="fold-in"><div class="fold-pad">${body}</div></div></div>
+    </div>`;
+}
+function foldToggle(btn){
+  const f = btn.closest('.fold'), open = !f.classList.contains('open');
+  f.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', open);
+  const cheat = f.querySelector('.cheat');
+  if(open && cheat) setTimeout(() => { csHints(cheat); csNudge(cheat); }, 360);
 }
 
 function renderLesson(topic){
   const L = topic.lesson;
   const steps = L.steps.map((t, i) => `<li><span class="ls-num">${i + 1}</span><span>${escapeHtml(t)}</span></li>`).join('');
   const lines = L.exLines.map(t => `<div class="ex-line">${escapeHtml(t)}</div>`).join('');
-  // Both parts start CLOSED so the page is not crowded. Tapping a button opens or closes its part (see lxToggle).
+  const lessonBody = `
+      <div class="lesson-idea">${escapeHtml(L.idea)}</div>
+      <div class="lesson-cols">
+        <div class="lesson-panel">
+          <h5>Steps</h5>
+          <ol class="ls-steps">${steps}</ol>
+        </div>
+        <div class="lesson-panel lesson-example">
+          <h5>${escapeHtml(L.exTitle)}</h5>
+          ${lines}
+          <div class="ex-answer">\u2705 ${escapeHtml(L.exAnswer)}</div>
+        </div>
+      </div>
+      <div class="lesson-tip"><span>\uD83D\uDCA1</span><p>${escapeHtml(L.tip)}</p></div>`;
   return `
-    <div class="lx-stack">
-      <section class="lx-drop lx-lesson">
-        <button type="button" class="lx-btn" id="lxBtnLesson" aria-expanded="false" aria-controls="lxBodyLesson" onclick="lxToggle(this)">
-          <span class="lx-badge" aria-hidden="true">\uD83D\uDCD8</span>
-          <span class="lx-txt"><span class="game-eyebrow">Quick lesson</span><span class="lx-title">${escapeHtml(L.title)}</span></span>
-          <span class="lx-state"><span class="lx-state-text">Show</span><span class="lx-chev" aria-hidden="true">\u25BE</span></span>
-        </button>
-        <div class="lx-body" id="lxBodyLesson" role="region" aria-labelledby="lxBtnLesson" hidden>
-          <div class="lesson-idea">${escapeHtml(L.idea)}</div>
-          <div class="lesson-cols">
-            <div class="lesson-panel">
-              <h5>Steps</h5>
-              <ol class="ls-steps">${steps}</ol>
-            </div>
-            <div class="lesson-panel lesson-example">
-              <h5>${escapeHtml(L.exTitle)}</h5>
-              ${lines}
-              <div class="ex-answer">\u2705 ${escapeHtml(L.exAnswer)}</div>
-            </div>
-          </div>
-          <div class="lesson-tip"><span>\uD83D\uDCA1</span><p>${escapeHtml(L.tip)}</p></div>
-        </div>
-      </section>
-      <section class="lx-drop lx-cheat">
-        <button type="button" class="lx-btn" id="lxBtnCheat" aria-expanded="false" aria-controls="lxBodyCheat" onclick="lxToggle(this)">
-          <span class="lx-badge" aria-hidden="true">\uD83D\uDCD2</span>
-          <span class="lx-txt"><span class="game-eyebrow">Cheat sheet</span><span class="lx-title">${escapeHtml(cheatSheetTitle(L.ref))}</span></span>
-          <span class="lx-state"><span class="lx-state-text">Show</span><span class="lx-chev" aria-hidden="true">\u25BE</span></span>
-        </button>
-        <div class="lx-body" id="lxBodyCheat" role="region" aria-labelledby="lxBtnCheat" hidden>
-          ${renderCheat(topic, false)}
-        </div>
-      </section>
+    <div class="lesson-stack">
+      ${foldHtml('lesson', '\uD83D\uDCD8', 'Quick lesson', escapeHtml(L.title), lessonBody)}
+      ${foldHtml('cheat', '\uD83D\uDCD2', 'Cheat sheet', 'Place values, examples, quick facts and a converter', renderCheat(topic))}
+      <div id="gameMount"></div>
     </div>`;
-}
-// Opens or closes one dropdown on the lesson page. It does not move the page.
-function lxToggle(btn){
-  const body = document.getElementById(btn.getAttribute('aria-controls'));
-  if(!body) return;
-  const open = body.hidden;                       // it is hidden now, so this tap opens it
-  body.hidden = !open;
-  btn.setAttribute('aria-expanded', String(open));
-  btn.querySelector('.lx-state-text').textContent = open ? 'Hide' : 'Show';
-  btn.closest('.lx-drop').classList.toggle('open', open);
-  if(open){ const ex = body.querySelector('.cs-pane[data-pane="examples"]:not([hidden])'); if(ex) csExFit(ex); }
 }
 
 /* ================= ACTIVITY LOG + ADMIN DASHBOARD ================= */
@@ -2338,6 +2316,7 @@ function updateAdminAccess(email){
   document.getElementById('adminNavBtn').style.display = isAdmin ? 'inline-flex' : 'none';
   document.getElementById('adminBottomNavBtn').style.display = isAdmin ? 'flex' : 'none';
   if(!isAdmin && document.getElementById('page-admin').classList.contains('active')) goToPage('home');
+  if(isAdmin && pendingAdminRoute){ pendingAdminRoute = false; goToPage('admin'); }
 }
 
 function formatWhen(ms){
@@ -2348,12 +2327,11 @@ function formatWhen(ms){
 function describeActivity(a){
   if(a.type === 'game_played') return `played <b>${escapeHtml(a.detail || 'a mini game')}</b>`;
   if(a.type === 'class_selected') return `chose class section <b>${escapeHtml(a.detail)}</b>`;
-  if(a.type === 'class_cleared') return `unselected class section <b>${escapeHtml(a.detail)}</b>`;
   if(a.type === 'topic_opened') return `opened the ${escapeHtml(a.detail)} lesson`;
   return escapeHtml(a.type || 'did something');
 }
 
-// ----- Admin: students grouped by class section (ICT - A, ICT - B) -----
+// ----- Admin: students grouped by class section (ICT - 1, ICT - 2) -----
 const ADMIN_NONE = '__none';
 let adminStudents = [], adminFilter = 'all';
 
@@ -2375,7 +2353,7 @@ function renderAdmin(){
   const now = Date.now(), dayAgo = now - 24*60*60*1000, weekAgo = now - 7*24*60*60*1000;
   if(adminFilter === ADMIN_NONE && !adminInSection(ADMIN_NONE).length) adminFilter = 'all';
 
-  // section cards (All, ICT - A, ICT - B, and "No section yet" when somebody has not picked)
+  // section cards (All, ICT - 1, ICT - 2, and "No section yet" when somebody has not picked)
   const cards = [{ key:'all', icon:'\uD83D\uDC65' }, ...CLASS_SECTIONS.map(s => ({ key:s, icon:'\uD83C\uDFEB' }))];
   if(adminInSection(ADMIN_NONE).length) cards.push({ key:ADMIN_NONE, icon:'\u2754' });
   document.getElementById('adminSections').innerHTML = cards.map(c => {
@@ -2454,7 +2432,7 @@ async function loadAdminDashboard(){
       const activity = activitySnap.docs.map(a => { const d = a.data(); return { ...d, ms: (d.at && d.at.toMillis) ? d.at.toMillis() : 0 }; })
         .sort((x, y) => y.ms - x.ms);
       return {
-        id: doc.id, name, email: u.email || '', level: u.level || '\u2014', classSection: u.classSection || '',
+        id: doc.id, name, email: u.email || '', level: u.level || '\u2014', classSection: classNormalize(u.classSection || ''),
         streak: calcStreaks(new Set(Array.isArray(u.activeDays) ? u.activeDays : [])).current,
         lastActive: u.lastSeenAt || u.lastLoginTimestamp || 0,
         games: activity.filter(a => a.type === 'game_played').length,
@@ -2491,6 +2469,7 @@ const WU_TYPES = [
   { tag:'Hexadecimal \u2192 Binary', from:16, to:2,  lo:16, hi:255 }
 ];
 const WU_BASE_NAME = { 2:'binary', 8:'octal', 10:'decimal', 16:'hex' };
+['bin-dec', 'dec-bin', 'bin-oct', 'oct-bin', 'bin-hex', 'hex-bin'].forEach((k, i) => { WU_TYPES[i].k = k; });
 function wuFmt(n, base){ return n.toString(base).toUpperCase(); }
 // What the student sees: binary numbers are shown in groups of 4 bits (display only, the answer is unchanged).
 function wuShow(n, base){
@@ -2578,10 +2557,21 @@ function newWarmup(){
   fb.textContent = 'Pick an answer!';
   fb.className = 'wu-feedback';
   document.getElementById('wuNext').classList.remove('show');
-  wuResetSolution();
+  const _ws = document.getElementById('wuSolution'); if(_ws){ _ws.hidden = true; _ws.innerHTML = ''; }
   document.getElementById('wuStreak').textContent = wuStreak;
   document.getElementById('wuBest').textContent = wuBest;
   document.getElementById('wuCount').textContent = wuCount;
+}
+
+// Wrong answer: show a short step-by-step solution under the question.
+function showWuSolution(){
+  const box = document.getElementById('wuSolution');
+  if(!box || !wuCurrent) return;
+  const item = CONV_ITEMS[WU_TYPES[wuCurrent.type].k];
+  if(!item) return;
+  const steps = convSolution(item, wuCurrent.n);
+  box.innerHTML = `<div class="wu-sol-head">\uD83D\uDCA1 Here is how to solve it</div><ol class="wu-sol-steps">${steps.map(t => `<li>${escapeHtml(t).replace(/; /g, '<br>')}</li>`).join('')}</ol>`;
+  box.hidden = false;
 }
 
 function answerWarmup(btn){
@@ -2612,33 +2602,11 @@ function answerWarmup(btn){
     fb.textContent = `Not quite \u2014 the answer is ${wuCurrent.answer}. Try the next one!`;
     fb.className = 'wu-feedback bad';
     wuStreak = 0;
+    showWuSolution();
   }
   document.getElementById('wuStreak').textContent = wuStreak;
   document.getElementById('wuBest').textContent = wuBest;
   document.getElementById('wuNext').classList.add('show');
-}
-
-// "Show solution" for the warm-up: the same step-by-step help the mini games give.
-const WU_KEY = { 2:'bin', 8:'oct', 10:'dec', 16:'hex' };
-function wuSolutionSteps(){
-  if(!wuCurrent) return [];
-  const T = WU_TYPES[wuCurrent.type];
-  const item = CONV_ITEMS[WU_KEY[T.from] + '-' + WU_KEY[T.to]];
-  return item ? convSolution(item, wuCurrent.n) : [];
-}
-function wuResetSolution(){
-  const box = document.getElementById('wuSolution'), btn = document.getElementById('wuSolBtn');
-  if(box) box.hidden = true;
-  if(btn){ btn.textContent = '\uD83D\uDCA1 Show solution'; btn.setAttribute('aria-expanded', 'false'); }
-}
-function toggleWarmupSolution(){
-  const box = document.getElementById('wuSolution'), btn = document.getElementById('wuSolBtn');
-  if(!box || !btn || !wuCurrent) return;
-  if(!box.hidden){ wuResetSolution(); return; }
-  const steps = wuSolutionSteps().map((t, i) => `<li><span class="gs-num">${i + 1}</span><span>${escapeHtml(t)}</span></li>`).join('');
-  box.innerHTML = `<div class="gs-head">\uD83D\uDCA1 How to solve it</div><ol class="gs-steps">${steps}</ol><div class="gs-answer"><span>Final answer</span><b>${escapeHtml(wuCurrent.answer)}</b></div>`;
-  box.hidden = false;
-  btn.textContent = '\uD83D\uDCA1 Hide solution'; btn.setAttribute('aria-expanded', 'true');
 }
 
 newWarmup();
@@ -2677,27 +2645,6 @@ function convDisplayNum(num, base, isExpr){
   const groups = [];
   for(let i = text.length; i > 0; i -= 4) groups.unshift(text.slice(Math.max(0, i - 4), i));
   return groups.map(g => `<span class="bit-grp">${escapeHtml(g)}</span>`).join('');
-}
-
-// Arithmetic questions are drawn "up and down", like on paper:
-//    add / subtract / multiply:  first number, then the sign and the second number, then a line, then the ? answer slot
-//    divide:                     long division (divisor on the left, dividend under the bar, ? answer on top)
-const VQ_WORD = { add:'plus', sub:'minus', mul:'times', div:'divided by' };
-function vqDigits(s){ return String(s).split('').map(ch => `<i>${escapeHtml(ch)}</i>`).join(''); }
-function vqHtml(v){
-  const label = `${v.a} ${VQ_WORD[v.op]} ${v.b}`;
-  if(v.op === 'div'){
-    return `<div class="vq vq-div" role="img" aria-label="${escapeHtml(label)}">
-      <span class="vq-sign"></span><span class="vq-num vq-unknown">?</span>
-      <span class="vq-divisor">${vqDigits(v.b)}</span><span class="vq-dividend">${vqDigits(v.a)}</span>
-    </div>`;
-  }
-  return `<div class="vq" role="img" aria-label="${escapeHtml(label)}">
-      <span class="vq-sign"></span><span class="vq-num">${vqDigits(v.a)}</span>
-      <span class="vq-sign">${escapeHtml(v.sym)}</span><span class="vq-num">${vqDigits(v.b)}</span>
-      <span class="vq-line"></span>
-      <span class="vq-sign"></span><span class="vq-num vq-unknown">?</span>
-    </div>`;
 }
 
 function correctAnswer(q){
@@ -2839,12 +2786,9 @@ function renderGame(){
     const steps = (q && q.solution && q.solution.length ? q.solution : [null,null,null]).map((t,i)=>`
         <li><span class="gs-num">${i+1}</span><span class="${t===null?'placeholder':''}">${t===null ? 'Step ' + (i+1) + ' of the solution will appear here.' : escapeHtml(t)}</span></li>`).join('');
 
-    const conv = (q && q.v) ? `
-        <div class="conv-row vq-wrap">
-          <div class="conv-box from vq-box">${vqHtml(q.v)}<span class="conv-sub">${baseLabel(q.from)}</span></div>
-        </div>` : (q && q.num) ? `
+    const conv = (q && q.num) ? `
         <div class="conv-row">
-          <div class="conv-box from"><b class="conv-num${q.expr ? ' expr' : ''}${String(q.num).replace(/\s/g, '').length > 8 ? ' long' : ''}">${convDisplayNum(q.num, q.from, q.expr)}</b><span class="conv-sub">${baseLabel(q.from)}</span></div>
+          <div class="conv-box from"><b class="conv-num${q.expr ? ' expr' : ''}">${convDisplayNum(q.num, q.from, q.expr)}</b><span class="conv-sub">${baseLabel(q.from)}</span></div>
           <span class="conv-arrow" aria-hidden="true">→</span>
           <div class="conv-box to"><b class="conv-num">?</b><span class="conv-sub">${baseLabel(q.to)}</span></div>
         </div>` : '';
@@ -2886,6 +2830,7 @@ function renderGame(){
           ${s.useLevels ? `<button class="game-pill game-pill-btn" onclick="gameBackToLevels()">↩ Change level</button>` : ''}
         </div>`;
 
+  skProblem = (!picking && q) ? { tag:`Question ${Math.min(s.idx + 1, Math.max(total, 1))} of ${total}`, text:q.q, num:q.num, from:q.from, to:q.to, expr:!!q.expr } : null;
   mount.innerHTML = `
     <div class="game-card">
       <div class="game-head">
@@ -2900,6 +2845,7 @@ function renderGame(){
       <div class="game-cta"><span>🚀</span><p>${escapeHtml(s.cta)}</p></div>
       ${body}
     </div>`;
+  skPaintProblem();
 }
 
 function gameCheck(){
@@ -2938,98 +2884,6 @@ function gameNext(){
 }
 
 function gameRestart(){ gameInit(gameState.topic); }
-
-
-/* ================= GAME PAGE =================
-   The mini game lives on its own page so a lesson is not crowded.
-   Flow: choose a topic -> choose Easy / Medium / Hard -> play (problem, answer box, sketchpad).
-   Students get here from the Game tab, or from the "Play the mini game" card at the bottom of a lesson. */
-let gameRef = null;            // { levelKey, topicKey } of the level on screen
-let gameHubBuilt = false;
-const GAME_SCROLL_TOP = () => window.scrollTo({ top:0, behavior:'smooth' });
-
-function showGameStep(name){
-  document.querySelectorAll('#page-game .gm-step').forEach(s => s.classList.toggle('active', s.id === 'gm-' + name));
-}
-function renderGameTopics(){
-  const el = document.getElementById('gmTopicGroups'); if(!el) return;
-  el.innerHTML = SECTION_ORDER.map(k => `
-    <div class="gm-section">
-      <div class="section-label"><h3>${escapeHtml(LEVELS[k].name)}</h3></div>
-      ${topicGroupsHtml(k, 'gameOpenFamily')}
-    </div>`).join('');
-}
-function gameHubEnter(){
-  if(!gameHubBuilt){ renderGameTopics(); gameHubBuilt = true; }
-}
-function gameOpenFamily(levelKey, familyKey){
-  const fam = familiesOf(levelKey).find(f => f.key === familyKey);
-  if(!fam) return;
-  document.getElementById('gmLevelsBody').innerHTML = familyLevelsHtml(levelKey, fam, 'gamePlay');
-  showGameStep('levels');
-  GAME_SCROLL_TOP();
-}
-function gameBackToTopicList(){ showGameStep('topics'); GAME_SCROLL_TOP(); }
-
-function gamePlay(levelKey, topicKey){
-  const topic = allTopicsOf(levelKey).find(t => t.key === topicKey);
-  if(!topic) return;
-  gameRef = { levelKey, topicKey };
-  const list = allTopicsOf(levelKey);
-  const isLast = list.findIndex(t => t.key === topicKey) >= list.length - 1;
-  const badge = document.getElementById('gmBadge');
-  badge.textContent = topic.icon;
-  badge.classList.toggle('res-badge-sm', topic.icon.length >= 3);
-  document.getElementById('gmEyebrow').textContent = LEVELS[levelKey].name + (topic.diff ? ' \u00B7 ' + DIFF_NAME[topic.diff] : '');
-  document.getElementById('gmTitle').textContent = topic.title;
-  document.getElementById('gmNextBtn').textContent = isLast ? 'All topics \u2713' : 'Next Level \u2192';
-  gameInit(topic);          // problem + answer box
-  sketchInit(topic);        // sketchpad
-  markActiveToday();
-  showGameStep('play');
-  GAME_SCROLL_TOP();
-}
-// Back from the play screen: return to that topic's Easy / Medium / Hard cards.
-function gameBackToPick(){
-  const fam = gameRef && familyOf(gameRef.levelKey, gameRef.topicKey);
-  if(fam){ gameOpenFamily(gameRef.levelKey, fam.key); return; }
-  showGameStep('topics'); GAME_SCROLL_TOP();
-}
-// Next goes Easy, Medium, Hard, then on to the next topic's Easy.
-function gameNextLevel(){
-  if(!gameRef) return;
-  const list = allTopicsOf(gameRef.levelKey);
-  const idx = list.findIndex(t => t.key === gameRef.topicKey);
-  if(idx >= 0 && idx < list.length - 1) gamePlay(gameRef.levelKey, list[idx + 1].key);
-  else { showGameStep('topics'); GAME_SCROLL_TOP(); }
-}
-// "Open lesson" on the play screen: go to the lesson for the same level.
-function gameOpenLesson(){
-  if(!gameRef) return;
-  const topic = allTopicsOf(gameRef.levelKey).find(t => t.key === gameRef.topicKey);
-  if(!topic) return;
-  goToPage('home');
-  showTopicResources(gameRef.levelKey, topic);
-  window.scrollTo({ top:0, behavior:'smooth' });
-}
-// The card at the bottom of every lesson.
-function playCtaHtml(topic){
-  return `
-    <div class="play-cta">
-      <span class="play-cta-ico" aria-hidden="true">\uD83C\uDFAE</span>
-      <div class="play-cta-text">
-        <h4>Ready to practice?</h4>
-        <p>Play the mini game for ${escapeHtml(topic.title)}${topic.diff ? ' (' + DIFF_NAME[topic.diff] + ')' : ''}. You solve the problems, type your answers, and get a sketchpad for your working out.</p>
-      </div>
-      <button type="button" class="game-btn primary play-cta-btn" onclick="playFromLesson()">Play the mini game \u2192</button>
-    </div>`;
-}
-function playFromLesson(){
-  if(!currentTopicRef) return;
-  goToPage('game');                       // also stops any lesson video
-  gameHubEnter();
-  gamePlay(currentTopicRef.levelKey, currentTopicRef.topicKey);
-}
 
 
 /* ================= STREAK CALENDAR (tracks the days a student practiced) ================= */
@@ -3160,6 +3014,36 @@ const SKETCH_COLORS = [
 const sketchPrefs = { tool:'pen', color:'#1E3A3A', size:4, bg:'grid' };
 const sketchStore = {};      // topic key -> { strokes:[], redo:[], w, h }
 let sketch = null;           // the sketchpad that is currently on screen
+let skProblem = null;        // the problem the student is working on right now (set by the mini game / practice)
+
+// Shows the current problem at the top of the sketch pad (it stays visible when the pad is maximized).
+function skPaintProblem(){
+  const el = document.getElementById('skProblem');
+  if(!el) return;
+  // a short highlight each time the problem changes, so the student notices the new question
+  const key = skProblem ? [skProblem.tag, skProblem.text, skProblem.num, skProblem.from, skProblem.to].join('|') : '';
+  const changed = key !== (el.dataset.key || '');
+  el.dataset.key = key;
+  if(!skProblem){
+    el.className = 'sk-problem empty';
+    el.innerHTML = '<span class="skp-tag">Current problem</span><span class="skp-text">Start the mini game and its question will show up here.</span><span class="skp-eq"><b class="skp-num unk">?</b></span>';
+    return;
+  }
+  const p = skProblem, bl = b => (BASE_NAMES[b] || 'base ' + b).toLowerCase();
+  const target = p.to ? `<span class="skp-arrow" aria-hidden="true">\u2192</span><b class="skp-num unk">?</b><span class="skp-base">${escapeHtml(bl(p.to))}</span>` : '';
+  el.className = 'sk-problem';
+  el.innerHTML = `<span class="skp-tag">${escapeHtml(p.tag)}</span><span class="skp-text">${escapeHtml(p.text)}</span>` +
+    (p.num ? `<span class="skp-eq"><b class="skp-num">${convDisplayNum(p.num, p.from, p.expr)}</b><span class="skp-base">${escapeHtml(bl(p.from))}</span>${target}</span>` : '');
+  if(changed){ el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+}
+
+// The problem bar sticks just under the top bar while the student scrolls through the sketch pad, so measure that bar once and on resize.
+function skSyncTopOffset(){
+  const nav = document.querySelector('.topnav');
+  const h = nav ? Math.round(nav.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty('--sk-top', (h + 8) + 'px');
+}
+window.addEventListener('resize', skSyncTopOffset);
 
 function skMid(a, b){ return { x:(a.x + b.x) / 2, y:(a.y + b.y) / 2 }; }
 
@@ -3182,8 +3066,7 @@ function sketchInit(topic){
         <div class="game-title-wrap">
           <span class="game-badge">✏️</span>
           <div>
-            <div class="game-eyebrow">Scratch space</div>
-            <h3 class="game-title">${escapeHtml(topic.title)} Sketchpad</h3>
+            <h3 class="game-title">Sketch pad</h3>
           </div>
         </div>
         <button type="button" class="sk-btn sk-max-btn" id="skMaxBtn" onclick="sketchToggleMax()" aria-label="Maximize sketchpad" aria-pressed="false">
@@ -3191,6 +3074,7 @@ function sketchInit(topic){
           <span id="skMaxTxt">Maximize</span>
         </button>
       </div>
+      <div class="sk-problem" id="skProblem" aria-live="polite"></div>
 
       <div class="sk-toolbar">
         <div class="sk-group">
@@ -3236,6 +3120,8 @@ function sketchInit(topic){
   }
   sketchFit();
   sketchSyncUI();
+  skSyncTopOffset();
+  skPaintProblem();
 }
 
 // Matches the canvas' pixel size to its on-screen size (sharp on retina screens) and redraws the saved strokes.
@@ -3661,3 +3547,133 @@ function sketchSyncUI(){
     el.addEventListener('animationend', e => { if(e.animationName === 'hl-pop') el.classList.remove('pop'); });
   });
 })();
+
+
+/* ================= GAME PAGE (next to Home): every mini game, with all three difficulties ================= */
+function showGameStep(name){
+  document.querySelectorAll('#page-game .game-step').forEach(x => x.classList.remove('active'));
+  document.getElementById('gstep-' + name).classList.add('active');
+  routeSync();
+}
+function renderGameSections(){
+  const el = document.getElementById('gSectionGrid');
+  if(el) el.innerHTML = sectionCardsHtml('gameChooseLevel');
+}
+function renderGameTopics(levelKey){
+  document.getElementById('gTopicsHeading').textContent = LEVELS[levelKey].name;
+  document.getElementById('gTopicGroups').innerHTML = topicGroupsHtml(levelKey, 'openGamePlay');
+}
+function openGamePage(){
+  goToPage('game', true);
+  showGameStep('sections');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+function gameChooseLevel(levelKey){
+  if(!LEVELS[levelKey]) return;
+  gameCtx.level = levelKey; gameCtx.family = null;
+  renderGameTopics(levelKey);
+  showGameStep('topics');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+function openGamePlay(levelKey, familyKey){
+  const fam = LEVELS[levelKey] && familiesOf(levelKey).find(f => f.key === familyKey);
+  if(!fam) return;
+  gameCtx.level = levelKey; gameCtx.family = familyKey;
+  const badge = document.getElementById('gBadge');
+  badge.textContent = fam.icon; badge.classList.toggle('res-badge-sm', fam.icon.length >= 3);
+  document.getElementById('gEyebrow').textContent = LEVELS[levelKey].name;
+  document.getElementById('gTitle').textContent = fam.title;
+  document.getElementById('resBody').innerHTML = '';
+  document.getElementById('gameBody').innerHTML = '<div id="gameMount"></div><div id="sketchMount"></div>';
+  // One game per topic that holds the Easy, Medium and Hard questions together (the student picks the level inside).
+  const topic = { key: fam.key, title: fam.title, icon: fam.icon, game: {
+    levels: true,
+    questions: fam.topics.flatMap(t => t.game.questions),
+    cta: `Think you can master ${fam.title}? Pick a level, beat your best score, and tap Show solution whenever you're stuck!`
+  } };
+  skProblem = null;
+  gameInit(topic);
+  sketchInit(topic);
+  markActiveToday();
+  showGameStep('play');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+function gameBackToTopicList(){
+  if(gameCtx.level){ renderGameTopics(gameCtx.level); showGameStep('topics'); }
+  else showGameStep('sections');
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+// "Try the mini game" button on a lesson: opens the same topic on the Game page.
+function gameFromLesson(){
+  if(!currentTopicRef) return;
+  const fam = familyOf(currentTopicRef.levelKey, currentTopicRef.topicKey);
+  if(!fam) return;
+  goToPage('game', true);
+  openGamePlay(currentTopicRef.levelKey, fam.key);
+}
+renderGameSections();
+
+/* ================= ROUTER: refresh keeps you where you were ================= */
+// The address bar shows the current screen, for example #learn/arith/add/easy or #game/conv/bin-dec.
+function routeHash(){
+  const pg = document.querySelector('.page.active');
+  const page = pg ? pg.id.replace('page-', '') : 'home';
+  if(page === 'home'){
+    const el = document.querySelector('#page-home .wizard-step.active'), step = el ? el.id.replace('step-', '') : 'welcome';
+    if(step === 'sections') return 'learn';
+    if(step === 'topics' && learnCtx.level) return 'learn/' + learnCtx.level;
+    if(step === 'levels' && learnCtx.level && learnCtx.family) return `learn/${learnCtx.level}/${learnCtx.family}`;
+    if(step === 'resources' && currentTopicRef){
+      const t = allTopicsOf(currentTopicRef.levelKey).find(x => x.key === currentTopicRef.topicKey), f = familyOf(currentTopicRef.levelKey, currentTopicRef.topicKey);
+      if(t && f) return `learn/${currentTopicRef.levelKey}/${f.key}/${t.diff}`;
+    }
+    return 'home';
+  }
+  if(page === 'game'){
+    const el = document.querySelector('#page-game .game-step.active'), step = el ? el.id.replace('gstep-', '') : 'sections';
+    if(step === 'topics' && gameCtx.level) return 'game/' + gameCtx.level;
+    if(step === 'play' && gameCtx.level && gameCtx.family) return `game/${gameCtx.level}/${gameCtx.family}`;
+    return 'game';
+  }
+  return page;
+}
+function routeSync(){
+  if(_routing) return;
+  const h = routeHash();
+  if(location.hash !== '#' + h && !(h === 'home' && !location.hash)) history.pushState(null, '', '#' + h);
+}
+function routeApply(raw){
+  const parts = String(raw || '').replace(/^#\/?/, '').split('/').filter(Boolean);
+  const page = parts[0] || 'home';
+  _routing = true;
+  try{
+    sketchResetMax();
+    if(page === 'learn'){
+      goToPage('home', true);
+      const lvl = parts[1], fam = parts[2], diff = parts[3];
+      if(lvl && LEVELS[lvl]){
+        const f = fam && familiesOf(lvl).find(x => x.key === fam);
+        if(f && diff){
+          const t = f.topics.find(x => x.diff === diff);
+          if(t) showTopicResources(lvl, t); else openFamily(lvl, fam);
+        } else if(f) openFamily(lvl, fam);
+        else { learnCtx.level = lvl; learnCtx.family = null; renderTopics(lvl); showWizardStep('topics'); }
+      } else showWizardStep('sections');
+    } else if(page === 'game'){
+      goToPage('game', true);
+      const lvl = parts[1], fam = parts[2];
+      if(lvl && LEVELS[lvl] && fam && familiesOf(lvl).some(f => f.key === fam)) openGamePlay(lvl, fam);
+      else if(lvl && LEVELS[lvl]){ gameCtx.level = lvl; gameCtx.family = null; renderGameTopics(lvl); showGameStep('topics'); }
+      else showGameStep('sections');
+    } else if(page === 'profile'){
+      goToPage('profile', true);
+    } else if(page === 'admin'){
+      if(currentUser && currentUser.email === ADMIN_EMAIL) goToPage('admin', true);
+      else { pendingAdminRoute = true; goToPage('home', true); showWizardStep('welcome'); }   // shown as soon as the admin account finishes signing in
+    } else {
+      goToPage('home', true); showWizardStep('welcome');
+    }
+  } finally { _routing = false; }
+}
+window.addEventListener('popstate', () => { routeApply(location.hash); window.scrollTo(0, 0); });
+if(location.hash) routeApply(location.hash);
