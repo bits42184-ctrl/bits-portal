@@ -1341,17 +1341,14 @@
   .bit-grp{display:inline-block; margin:0 .18em;}
   .conv-sub{font-size:11.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-soft);}
   .conv-arrow{align-self:center; font-family:'Fredoka',sans-serif; font-size:30px; font-weight:700; color:var(--teal-dark);}
-  .app.mobile-mode .conv-row{gap:8px; flex-wrap:nowrap;}
-  .app.mobile-mode .conv-box{min-width:0; flex:1.5 1 0; padding:12px 12px 10px;}
-  .app.mobile-mode .conv-box.to{flex:.8 1 0;}
-  .app.mobile-mode .conv-arrow{flex:none;}
+  .app.mobile-mode .conv-row{gap:8px;}
+  .app.mobile-mode .conv-box{min-width:130px; padding:12px 14px 10px;}
   .app.mobile-mode .conv-num{font-size:26px;}
   .app.mobile-mode .conv-arrow{font-size:24px;}
   @media (max-width:520px){
-    .conv-row{flex-wrap:nowrap; gap:8px;}
-    .conv-box{flex:1.5 1 0; min-width:0; padding:12px 10px 10px;}
-    .conv-box.to{flex:.8 1 0;}
-    .conv-arrow{font-size:22px; flex:none;}
+    .conv-row{flex-direction:column; align-items:center;}
+    .conv-box{width:100%; min-width:0;}
+    .conv-arrow{transform:rotate(90deg);}
   }
 
   .game-input{letter-spacing:.08em;}
@@ -1423,10 +1420,7 @@
   .wu-unknown{color:var(--orange-dark);}
   .app.mobile-mode .wu-num{font-size:28px;}
   .app.mobile-mode .wu-q-part{min-width:0; padding:12px 16px 8px;}
-  .app.mobile-mode .wu-q-arrow{font-size:24px; flex:none;}
-  .app.mobile-mode .wu-question{flex-wrap:nowrap; gap:8px;}
-  .app.mobile-mode .wu-q-part{flex:1 1 0; min-width:0;}
-  .app.mobile-mode .wu-q-part:has(.wu-unknown){flex:.8 1 0;}
+  .app.mobile-mode .wu-q-arrow{transform:rotate(90deg); font-size:24px;}
 
   /* ---------- Topic cards: difficulty mix ---------- */
   .topic-meta{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px;}
@@ -1819,11 +1813,12 @@
   .admin-table{min-width:760px;}
 
   @media (max-width:760px){
-    .cp-options{grid-template-columns:1fr 1fr; gap:10px;}
+    .cp-options{grid-template-columns:1fr; gap:10px;}
     .cp-name{font-size:17px;}
     .adm-ev{flex-direction:column; gap:1px;}
   }
-  .app.mobile-mode .cp-options{grid-template-columns:1fr 1fr; gap:10px;}
+  .app.mobile-mode .cp-options{grid-template-columns:1fr; gap:10px;}
+  .app.mobile-mode .cp-opt{min-width:0; width:100%; box-sizing:border-box;}
   .app.mobile-mode .cp-opt{padding:12px 12px;}
   .app.mobile-mode .cp-letter{width:36px; height:36px; font-size:19px;}
   .app.mobile-mode .cp-name{font-size:16px;}
@@ -1943,12 +1938,11 @@
     font-size:13px; letter-spacing:.16em; text-transform:uppercase; box-shadow:0 4px 0 rgba(0,0,0,.2);
   }
   .hero-chips{position:relative; z-index:2; display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin:0 auto 28px;}
-  .hero-chips{gap:6px 18px; pointer-events:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent;}
   .hero-chips span{
-    font-family:'Fredoka', sans-serif; font-weight:600; font-size:14px; letter-spacing:.04em; color:rgba(15,43,43,.78);
-    background:none; border:0; border-radius:0; padding:0; box-shadow:none;
+    font-family:'Fredoka', sans-serif; font-weight:600; font-size:13.5px; color:#0F2B2B;
+    background:rgba(255,255,255,.7); border:2px solid rgba(18,36,42,.85); border-radius:999px; padding:6px 16px;
+    box-shadow:0 3px 0 rgba(18,36,42,.85);
   }
-  .hero-chips span + span::before{content:'\2022'; margin-right:18px; opacity:.5;}
   .hero-sub{margin-bottom:20px;}
   @media (max-width:640px){
     .hero-brand{gap:8px;}
@@ -2096,124 +2090,506 @@
   .dp-card, .dp-orb, .dp-rocket, .dp-banner{animation:none !important;}
   .dp-card, .dp-play b, .dp-card::after{transition:none !important;}
 }
+/* =====================================================================
+   REVISION: plain hero words, dropdown lessons, difficulty badge, cheat sheet
+   scroll cues, sketch pad problem bar, Game tab, warm-up solution
+   ===================================================================== */
 
+/* Home: the four number-system words are plain text now (no highlight pills) */
+.hero-chips{gap:4px 6px;}
+.hero-chips span{background:none; border:0; box-shadow:none; padding:0 2px; font-weight:500; font-size:14px; color:var(--ink-soft);}
+.hero-chips span + span::before{content:'\00B7'; margin-right:8px; opacity:.6;}
 
-/* ===== HOME WARM-UP: Show solution ===== */
-.wu-actions{display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:12px; margin-top:14px;}
-.wu-actions .wu-next{margin:0;}
-.wu-sol-btn{
-  background:#fff; color:var(--orange-dark); border:2px solid var(--orange); font-weight:700; font-size:14px;
-  padding:10px 22px; border-radius:999px; box-shadow:0 4px 0 var(--orange); cursor:pointer;
-  transition:transform .12s, box-shadow .12s;
-}
-.wu-sol-btn:active{transform:translateY(3px); box-shadow:none;}
-.wu-sol-btn:focus-visible{outline:3px solid var(--orange); outline-offset:3px;}
-.wu-solution{
-  margin:16px auto 0; max-width:560px; text-align:left; padding:18px 20px;
-  border-radius:var(--radius-md); background:#FFFBEA; border:2px solid #F2D675;
-}
+/* Home: quick warm-up solution (shown after a wrong answer) */
+.wu-solution{margin-top:14px; padding:14px 16px; border-radius:14px; background:#FFFBEA; border:2px solid #F2D675; text-align:left; animation:csIn .25s ease both;}
 .wu-solution[hidden]{display:none;}
-.wu-solution:not([hidden]){animation:fadein .3s ease;}
+.wu-sol-head{font-family:'Fredoka',sans-serif; font-weight:600; font-size:15px; color:#7A5B08; margin-bottom:8px;}
+.wu-sol-steps{margin:0; padding-left:22px; display:flex; flex-direction:column; gap:8px;}
+.wu-sol-steps li{font-size:14px; line-height:1.5; font-weight:500; color:var(--ink); overflow-wrap:anywhere;}
 
-/* ===== ARITHMETIC QUESTIONS: "up and down" (column) format ===== */
-.vq-wrap{justify-content:center;}
-.conv-box.vq-box{flex:0 1 auto; min-width:min(250px, 100%); padding:18px 28px 12px;}
-.vq{
-  display:inline-grid; grid-template-columns:auto auto; align-items:center; justify-items:end;
-  column-gap:.3em; row-gap:.06em;
-  font-family:'Fredoka',sans-serif; font-weight:600; font-size:40px; line-height:1.15; color:var(--ink);
-}
-.vq i{display:inline-block; width:.62em; font-style:normal; text-align:center;}
-.vq-sign{justify-self:center; min-width:.8em; text-align:center; color:var(--teal-dark); font-size:.9em;}
-.vq-num{display:inline-flex; justify-content:flex-end; white-space:nowrap;}
-.vq-line{grid-column:1 / -1; justify-self:stretch; height:4px; border-radius:3px; background:var(--ink); margin:.1em 0 .14em;}
-.vq-unknown{color:var(--orange-dark); background:#fff; border:2px dashed var(--line); border-radius:12px; padding:0 .55em;}
-.vq-divisor{justify-self:end; align-self:end; display:inline-flex; padding-right:.28em;}
-.vq-dividend{
-  justify-self:start; display:inline-flex; padding:.04em .22em 0 .3em;
-  border-top:4px solid var(--ink); border-left:4px solid var(--ink); border-top-left-radius:.55em;
-}
-.app.mobile-mode .vq{font-size:28px;}
-.app.mobile-mode .conv-box.vq-box{flex:0 1 auto; min-width:min(210px, 100%); padding:14px 18px 10px;}
-@media (max-width:380px){ .app.mobile-mode .vq{font-size:25px;} }
+/* Game page steps (same fade as the Home steps) */
+.game-step{display:none;}
+.game-step.active{display:block; animation:fadein .35s ease;}
 
-/* ===== CHEAT SHEET: "More examples" box scrolls after a few examples (scrollbar hidden) ===== */
-.cs-exgrid{position:relative;}
-.cs-exgrid.scrolls{
-  overflow-y:auto; overscroll-behavior-y:auto; scrollbar-width:none; -ms-overflow-style:none; padding:2px 3px;
-  -webkit-mask-image:linear-gradient(to bottom, #000 calc(100% - 30px), transparent);
-          mask-image:linear-gradient(to bottom, #000 calc(100% - 30px), transparent);
-}
-.cs-exgrid.scrolls::-webkit-scrollbar{display:none; width:0; height:0;}
-.cs-exgrid.scrolls.at-end{-webkit-mask-image:none; mask-image:none;}
-.cs-exgrid:focus-visible{outline:3px solid var(--orange); outline-offset:3px; border-radius:14px;}
-.cs-scrollnote{font-weight:700; color:var(--teal-dark);}
+/* Dropdown cards: Quick lesson and Cheat sheet */
+.lesson-stack{display:flex; flex-direction:column; gap:16px;}
+.fold{background:#fff; border:2px solid var(--line); border-radius:var(--radius-lg); box-shadow:0 5px 0 var(--line); overflow:hidden; transition:border-color .2s ease, box-shadow .2s ease;}
+.fold.open{border-color:var(--teal); box-shadow:0 5px 0 var(--teal);}
+.fold-head{width:100%; display:flex; align-items:center; gap:14px; padding:16px 18px; background:none; border:0; cursor:pointer; text-align:left; font-family:inherit; color:var(--ink);}
+.fold-head:focus-visible{outline:3px solid var(--orange); outline-offset:-3px;}
+.fold-ico{flex:none; width:46px; height:46px; border-radius:14px; display:grid; place-items:center; font-size:23px; background:var(--surface);}
+.fold-text{min-width:0; flex:1;}
+.fold-title{display:block; font-family:'Fredoka',sans-serif; font-weight:600; font-size:19px; line-height:1.2;}
+.fold-sub{display:block; margin-top:2px; font-size:13px; font-weight:600; color:var(--ink-soft); overflow-wrap:anywhere;}
+.fold-chev{flex:none; width:36px; height:36px; border-radius:50%; background:var(--surface); display:grid; place-items:center;}
+.fold-chev::before{content:''; width:9px; height:9px; border-right:3px solid var(--teal-dark); border-bottom:3px solid var(--teal-dark); transform:translateY(-2px) rotate(45deg); transition:transform .25s ease;}
+.fold.open .fold-chev::before{transform:translateY(2px) rotate(-135deg);}
+.fold-body{display:grid; grid-template-rows:0fr; transition:grid-template-rows .32s ease;}
+.fold.open .fold-body{grid-template-rows:1fr;}
+.fold-in{overflow:hidden; min-height:0; visibility:hidden; transition:visibility 0s .32s;}
+.fold.open .fold-in{visibility:visible; transition-delay:0s;}
+.fold-pad{padding:4px 18px 20px;}
+.fold .cheat{margin:0; padding:0; border:0; box-shadow:none; border-radius:0; overflow:visible;}
+.fold .cheat::before{display:none;}
+.app.mobile-mode .fold-head{padding:14px 12px; gap:12px;}
+.app.mobile-mode .fold-pad{padding:2px 12px 16px;}
+.app.mobile-mode .fold-title{font-size:17px;}
+@media (prefers-reduced-motion: reduce){ .fold, .fold-body, .fold-chev::before, .fold-in{transition:none;} }
 
-/* ===== GAME PAGE ===== */
-.gm-step{display:none;}
-.gm-step.active{display:block; animation:fadein .35s ease;}
-.gm-section{margin-bottom:30px;}
-.gm-section .section-label{margin-top:22px;}
-.gm-section:first-child .section-label{margin-top:0;}
-.play-cta{
-  display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:30px; padding:22px 24px;
-  border-radius:22px; border:2px solid var(--line); box-shadow:0 5px 0 var(--line);
-  background:linear-gradient(100deg, #EAF6F1 0%, #FFF6DC 100%);
-}
-.play-cta-ico{font-size:40px; line-height:1; flex:none;}
-.play-cta-text{flex:1 1 240px; min-width:0;}
-.play-cta-text h4{margin:0 0 4px; font-family:'Fredoka',sans-serif; font-size:21px; color:var(--ink);}
-.play-cta-text p{margin:0; font-size:14.5px; line-height:1.5; color:var(--ink-soft);}
-.play-cta-btn{flex:none;}
-@media (max-width:640px){ .play-cta-btn{width:100%;} }
-.app.mobile-mode .play-cta-btn{width:100%;}
-.conv-box.vq-box .conv-sub{margin-top:10px;}
-/* long numbers (more than 8 digits, e.g. 16-bit binary) get a smaller font on small screens so they wrap in two lines */
-@media (max-width:520px){ .conv-num.long{font-size:20px;} }
-.app.mobile-mode .conv-num.long{font-size:20px;}
+/* Practice card (moved out of the cheat sheet) */
+.practice-card .cs-quiz{margin:0 auto;}
+.practice-more{margin-top:18px; display:flex; justify-content:center;}
 
+/* Difficulty badge on every lesson */
+.res-diff{display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:6px 14px; border-radius:999px; font-family:'Fredoka',sans-serif; font-weight:700; font-size:14px; border:2px solid currentColor; white-space:nowrap;}
+.res-diff[hidden]{display:none;}
+.practice-card .game-head .res-diff{margin-top:0;}
+.res-diff.pop{animation:diffPop .6s cubic-bezier(.2,1.4,.4,1);}
+@keyframes diffPop{0%{transform:scale(.6); opacity:0;} 60%{transform:scale(1.12); opacity:1;} 100%{transform:none;}}
+#resTop[data-diff="easy"] .res-badge{background:linear-gradient(135deg, #4DB6A0, var(--teal-dark)); box-shadow:0 6px 0 var(--teal-dark);}
+#resTop[data-diff="medium"] .res-badge{background:linear-gradient(135deg, #EDC24A, #C99A1C); box-shadow:0 6px 0 #9A7410;}
+#resTop[data-diff="hard"] .res-badge{background:linear-gradient(135deg, #EE7068, #CF3A31); box-shadow:0 6px 0 #B3261E;}
+@media (prefers-reduced-motion: reduce){ .res-diff.pop{animation:none;} }
 
-/* ===== LESSON PAGE: Quick lesson and Cheat sheet are dropdowns (closed until tapped) ===== */
-.lx-stack{display:flex; flex-direction:column; gap:16px;}
-.lx-drop{
-  position:relative; overflow:hidden; background:#fff; border:2px solid var(--line); border-radius:var(--radius-lg);
-  box-shadow:0 5px 0 var(--line); transition:border-color .2s ease, box-shadow .2s ease;
+/* Cheat sheet: invisible scrollbars, with clear "there is more" cues */
+.cs-tabsbar{position:relative; margin-bottom:16px;}
+.cs-tabsbar .cs-tabs{margin-bottom:0;}
+.cs-tabsbar::before, .cs-tabsbar::after{
+  position:absolute; top:0; bottom:0; width:48px; display:grid; place-items:center; pointer-events:none; opacity:0; transition:opacity .2s ease;
+  font-family:'Fredoka',sans-serif; font-weight:700; font-size:26px; color:var(--teal-dark); z-index:2;
 }
-.lx-drop::before{content:''; position:absolute; left:0; right:0; top:0; height:6px; background:linear-gradient(90deg, var(--teal), #6FC7A6, #B7E38A, var(--orange));}
-.lx-cheat::before{background:linear-gradient(90deg, #7C5CD6, var(--teal) 55%, var(--orange));}
-.lx-drop.open{border-color:var(--teal); box-shadow:0 5px 0 var(--teal-dark);}
-.lx-cheat.open{border-color:#7C5CD6; box-shadow:0 5px 0 #5B3FB0;}
-.lx-btn{
-  display:flex; align-items:center; gap:14px; width:100%; padding:24px 22px 18px; margin:0;
-  background:none; border:0; cursor:pointer; text-align:left; font-family:inherit; color:var(--ink);
-  -webkit-tap-highlight-color:transparent; transition:background .15s ease;
+.cs-tabsbar::after{content:'\203A'; right:0; border-radius:0 999px 999px 0; background:linear-gradient(90deg, rgba(255,255,255,0), var(--surface) 62%); animation:csArrowX 1.1s ease-in-out infinite;}
+.cs-tabsbar::before{content:'\2039'; left:0; border-radius:999px 0 0 999px; background:linear-gradient(270deg, rgba(255,255,255,0), var(--surface) 62%);}
+.cs-tabsbar.more-r::after, .cs-tabsbar.more-l::before{opacity:1;}
+@keyframes csArrowX{0%,100%{transform:translateX(0);} 50%{transform:translateX(5px);}}
+
+.cs-body{position:relative;}
+.cs-pane{max-height:min(64vh, 560px); overflow-y:auto; overflow-x:hidden; scrollbar-width:none; -ms-overflow-style:none; padding:4px 3px 12px;}
+.cs-pane::-webkit-scrollbar{display:none;}
+.cs-pane[hidden]{display:none !important;}
+.cs-body::after{content:''; position:absolute; left:0; right:0; bottom:0; height:64px; background:linear-gradient(180deg, rgba(255,255,255,0), #fff 88%); pointer-events:none; opacity:0; transition:opacity .2s ease; z-index:1;}
+.cs-more{position:absolute; left:50%; bottom:10px; transform:translateX(-50%); z-index:2; pointer-events:none; opacity:0; transition:opacity .2s ease;
+  padding:6px 14px; border-radius:999px; background:var(--teal); color:#fff; font-family:'Fredoka',sans-serif; font-weight:600; font-size:13px; box-shadow:0 3px 0 var(--teal-dark); white-space:nowrap;}
+.cs-body.more::after, .cs-body.more .cs-more{opacity:1;}
+.cs-body.more .cs-more{animation:csBob 1.4s ease-in-out infinite;}
+@keyframes csBob{0%,100%{transform:translateX(-50%) translateY(0);} 50%{transform:translateX(-50%) translateY(-4px);}}
+@media (prefers-reduced-motion: reduce){ .cs-tabsbar::after, .cs-body.more .cs-more{animation:none;} }
+
+/* Sketch pad: current problem bar (stays visible when the pad is maximized) */
+.sk-problem{display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:0 0 12px; padding:10px 14px; border-radius:14px; background:#FFF3C9; border:2px solid #F2D675; color:var(--ink);}
+.sk-problem.empty{background:var(--surface); border-color:var(--line); color:var(--ink-soft);}
+.skp-tag{font-size:11.5px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#7A5B08; background:#fff; border-radius:999px; padding:3px 10px; white-space:nowrap;}
+.sk-problem.empty .skp-tag{color:var(--ink-soft);}
+.skp-text{flex:1 1 180px; min-width:0; font-size:13.5px; font-weight:600; line-height:1.4;}
+.skp-eq{display:inline-flex; align-items:baseline; flex-wrap:wrap; gap:4px 8px;}
+.skp-num{font-family:'Baloo 2','Fredoka',sans-serif; font-weight:800; font-size:24px; line-height:1.1; letter-spacing:.04em; color:var(--teal-dark); overflow-wrap:anywhere;}
+.skp-num.unk{color:var(--orange-dark);}
+.skp-num .bit-grp{margin:0 .16em;}
+.skp-base{font-size:12px; font-weight:700; color:var(--ink-soft);}
+.skp-arrow{font-weight:800; color:var(--ink-soft);}
+.sketch-card.sk-fixed .sk-problem{margin-bottom:8px;}
+.app.mobile-mode .sk-problem{padding:8px 10px;}
+.app.mobile-mode .skp-text{flex-basis:100%;}
+.app.mobile-mode .skp-num{font-size:21px;}
+
+/* ================= SKETCH PAD: the current problem stays in view while scrolling through the pad ================= */
+.sketch-card{overflow:visible; overflow:clip;}   /* clip (not hidden) so the sticky problem bar can stick */
+.sketch-card::before{border-radius:var(--radius-lg) var(--radius-lg) 0 0;}
+.sketch-card .sk-problem{position:sticky; top:var(--sk-top, 80px); z-index:15; box-shadow:0 10px 18px -8px rgba(30,58,58,.28);}
+.sketch-card.sk-fixed .sk-problem{position:static; box-shadow:none;}   /* maximized: the bar is already pinned at the top */
+.sk-problem.pop{animation:skpPop .7s ease;}
+@keyframes skpPop{
+  0%{transform:scale(.97); box-shadow:0 0 0 0 rgba(242,214,117,.95);}
+  55%{transform:scale(1.015); box-shadow:0 0 0 9px rgba(242,214,117,0);}
+  100%{transform:none;}
 }
-.lx-btn:hover{background:var(--surface);}
-.lx-btn:focus-visible{outline:3px solid var(--orange); outline-offset:-4px;}
-.lx-badge{
-  width:52px; height:52px; border-radius:16px; display:grid; place-items:center; font-size:26px; flex:none;
-  background:linear-gradient(135deg, var(--teal), var(--teal-dark)); box-shadow:0 5px 0 var(--teal-dark);
+.app.mobile-mode .sketch-card .sk-problem{padding:7px 10px; gap:3px 10px;}
+.app.mobile-mode .sketch-card .skp-text{font-size:12.5px; line-height:1.3;}
+.app.mobile-mode .sketch-card .skp-num{font-size:19px;}
+@media (prefers-reduced-motion:reduce){ .sk-problem.pop{animation:none;} }
+
+/* Empty state looks like the live problem bar (same yellow card), just calmer */
+.sk-problem.empty{background:#FFF3C9; border-color:#F2D675; color:var(--ink-soft);}
+.sk-problem.empty .skp-tag{color:#7A5B08;}
+.sk-problem.empty .skp-num{opacity:.55;}
+
+/* The mini game now lives inside the lesson page, right under the quick lesson and cheat sheet */
+.lesson-stack #gameMount{margin-top:0;}
+  /* =====================================================================
+     TOPIC CARDS (wide rows): depth, shadow, glow accent bar, polished icon
+     ===================================================================== */
+  .topic-grid-wide .topic-card{
+    background:linear-gradient(135deg, #ffffff 0%, #ffffff 55%, var(--surface) 100%);
+    border:2px solid var(--line);
+    border-radius:22px;
+    /* layered shadow: soft drop + tight contact + chunky 3D base */
+    box-shadow:
+      0 1px 2px rgba(60,20,40,.06),
+      0 8px 18px rgba(60,20,40,.09),
+      0 5px 0 var(--line);
+    transition:transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s ease, border-color .2s ease;
+    isolation:isolate;
+  }
+  /* accent bar: gradient + light sheen, wider than before */
+  .topic-grid-wide .topic-card::before{
+    width:9px; opacity:1;
+    background:linear-gradient(180deg, var(--tone) 0%, var(--tone-dark) 100%);
+    box-shadow:inset -2px 0 0 rgba(255,255,255,.28), 3px 0 10px rgba(0,0,0,.10);
+  }
+  /* soft tinted glow in the corner behind the arrow */
+  .topic-grid-wide .topic-card::after{
+    content:''; position:absolute; right:-40px; top:-40px; width:150px; height:150px; border-radius:50%;
+    background:radial-gradient(circle, var(--tone) 0%, transparent 70%);
+    opacity:.10; z-index:-1; pointer-events:none; transition:opacity .2s ease, transform .3s ease;
+  }
+  .topic-grid-wide .topic-card:hover{
+    transform:translateY(-5px);
+    border-color:var(--tone);
+    box-shadow:
+      0 2px 4px rgba(60,20,40,.06),
+      0 18px 32px rgba(60,20,40,.16),
+      0 7px 0 var(--tone-dark);
+  }
+  .topic-grid-wide .topic-card:hover::after{opacity:.22; transform:scale(1.25);}
+  .topic-grid-wide .topic-card:active{
+    transform:translateY(2px);
+    box-shadow:0 1px 2px rgba(60,20,40,.08), 0 3px 8px rgba(60,20,40,.10), 0 2px 0 var(--tone-dark);
+  }
+
+  /* icon tile: raised look with inner highlight */
+  .topic-grid-wide .topic-icon{
+    background:linear-gradient(145deg, #ffffff 0%, var(--surface-2) 100%);
+    border:2px solid var(--line);
+    box-shadow:0 4px 0 var(--line), 0 8px 14px rgba(60,20,40,.08), inset 0 2px 0 rgba(255,255,255,.9);
+    font-size:26px;
+  }
+  .topic-grid-wide .topic-card:hover .topic-icon{
+    background:linear-gradient(145deg, var(--tone) 0%, var(--tone-dark) 100%);
+    border-color:var(--tone-dark);
+    box-shadow:0 4px 0 var(--tone-dark), 0 10px 18px rgba(60,20,40,.18), inset 0 2px 0 rgba(255,255,255,.35);
+    color:#fff;
+  }
+
+  /* arrow: round button that fills with the tone color on hover */
+  .topic-grid-wide .topic-arrow{
+    width:40px; height:40px; flex:none; border-radius:50%; display:grid; place-items:center;
+    font-size:20px; line-height:1; background:#fff; border:2px solid var(--line);
+    box-shadow:0 3px 0 var(--line);
+    transition:transform .2s ease, background .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease;
+  }
+  .topic-grid-wide .topic-card:hover .topic-arrow{
+    background:var(--tone); border-color:var(--tone-dark); color:#fff;
+    box-shadow:0 3px 0 var(--tone-dark); transform:translateX(5px);
+  }
+  .topic-grid-wide .topic-title{letter-spacing:.1px;}
+
+  /* group labels: a bit more presence */
+  .topic-group-label{text-shadow:0 1px 0 rgba(255,255,255,.8);}
+  .topic-group-label .tg-dot{box-shadow:0 2px 6px rgba(60,20,40,.22);}
+
+  /* mobile: a little tighter so it still feels light */
+  .app.mobile-mode .topic-grid-wide .topic-card{
+    box-shadow:0 1px 2px rgba(60,20,40,.06), 0 6px 14px rgba(60,20,40,.09), 0 4px 0 var(--line);
+  }
+  .app.mobile-mode .topic-grid-wide .topic-arrow{width:34px; height:34px; font-size:18px;}
+  .app.mobile-mode .topic-grid-wide .topic-icon{font-size:22px;}
+
+  @media (prefers-reduced-motion: reduce){
+    .topic-grid-wide .topic-card, .topic-grid-wide .topic-card::after, .topic-grid-wide .topic-arrow{transition:none;}
+    .topic-grid-wide .topic-card:hover{transform:none;}
+  }
+
+  /* =====================================================================
+     SECTION CARDS (Choose a section): depth, shadow, glow, polished icon
+     ===================================================================== */
+  .sec-card{
+    background:linear-gradient(135deg, #ffffff 0%, #ffffff 55%, var(--surface) 100%);
+    border-radius:26px;
+    box-shadow:
+      0 1px 2px rgba(60,20,40,.06),
+      0 10px 22px rgba(60,20,40,.10),
+      0 7px 0 var(--line);
+    transition:transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s ease, border-color .2s ease;
+    isolation:isolate;
+  }
+  .sec-card::before{
+    width:11px;
+    background:linear-gradient(180deg, var(--tone) 0%, var(--tone-dark) 100%);
+    box-shadow:inset -2px 0 0 rgba(255,255,255,.28), 3px 0 12px rgba(0,0,0,.12);
+  }
+  .sec-card::after{
+    content:''; position:absolute; right:-50px; top:-50px; width:190px; height:190px; border-radius:50%;
+    background:radial-gradient(circle, var(--tone) 0%, transparent 70%);
+    opacity:.10; z-index:-1; pointer-events:none; transition:opacity .2s ease, transform .3s ease;
+  }
+  .sec-card:hover{
+    transform:translateY(-6px);
+    border-color:var(--tone);
+    box-shadow:
+      0 2px 4px rgba(60,20,40,.06),
+      0 22px 38px rgba(60,20,40,.18),
+      0 10px 0 var(--tone-dark);
+  }
+  .sec-card:hover::after{opacity:.24; transform:scale(1.25);}
+  .sec-card:active{
+    transform:translateY(2px);
+    box-shadow:0 1px 2px rgba(60,20,40,.08), 0 3px 8px rgba(60,20,40,.10), 0 3px 0 var(--tone-dark);
+  }
+
+  /* symbol tile: glossy gradient, chunky base, soft drop shadow, top highlight */
+  .sec-symbol{
+    position:relative;
+    background:linear-gradient(145deg, var(--tone) 0%, var(--tone-dark) 100%);
+    box-shadow:0 6px 0 var(--tone-dark), 0 12px 20px rgba(60,20,40,.22), inset 0 2px 0 rgba(255,255,255,.35);
+    text-shadow:0 2px 4px rgba(0,0,0,.22);
+    transition:transform .2s ease;
+  }
+  .sec-symbol::after{
+    content:''; position:absolute; left:10%; right:10%; top:6%; height:38%; border-radius:50% 50% 60% 60% / 100% 100% 40% 40%;
+    background:linear-gradient(180deg, rgba(255,255,255,.28), rgba(255,255,255,0)); pointer-events:none;
+  }
+  .sec-card:hover .sec-symbol{transform:rotate(-5deg) scale(1.06);}
+  .sec-name{letter-spacing:.1px;}
+  .sec-meta{box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.05), 0 2px 0 rgba(60,20,40,.06);}
+
+  /* arrow: round button that fills with the tone on hover */
+  .sec-card .topic-arrow{
+    width:46px; height:46px; flex:none; border-radius:50%; display:grid; place-items:center;
+    font-size:22px; line-height:1; background:#fff; border:2px solid var(--line); box-shadow:0 3px 0 var(--line);
+    transition:transform .2s ease, background .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease;
+  }
+  .sec-card:hover .topic-arrow{
+    background:var(--tone); border-color:var(--tone-dark); color:#fff;
+    box-shadow:0 3px 0 var(--tone-dark); transform:translateX(5px);
+  }
+
+  .app.mobile-mode .sec-card{
+    box-shadow:0 1px 2px rgba(60,20,40,.06), 0 7px 16px rgba(60,20,40,.10), 0 5px 0 var(--line);
+  }
+  .app.mobile-mode .sec-symbol{box-shadow:0 4px 0 var(--tone-dark), 0 8px 14px rgba(60,20,40,.2), inset 0 2px 0 rgba(255,255,255,.35);}
+  .app.mobile-mode .sec-card .topic-arrow{width:38px; height:38px; font-size:19px;}
+
+  @media (prefers-reduced-motion: reduce){
+    .sec-card, .sec-card::after, .sec-symbol, .sec-card .topic-arrow{transition:none;}
+    .sec-card:hover, .sec-card:hover .sec-symbol{transform:none;}
+  }
+
+  /* =====================================================================
+     PROFILE PAGE: landscape layout on computer only (phone layout unchanged)
+     ===================================================================== */
+  .app:not(.mobile-mode) #page-profile > .module-card{
+    max-width:980px !important; width:100%;
+    display:grid; grid-template-columns:1fr 1fr; column-gap:20px; row-gap:0; align-items:stretch;
+    padding:26px 28px;
+  }
+  .app:not(.mobile-mode) #page-profile > .module-card:hover{transform:none;}
+  .app:not(.mobile-mode) #page-profile > .module-card > *:nth-child(1){grid-column:1 / -1;}      /* avatar + name + email */
+  .app:not(.mobile-mode) #page-profile > .module-card > *:nth-child(2),                            /* notifications */
+  .app:not(.mobile-mode) #page-profile > .module-card > *:nth-child(3){margin:14px 0; min-height:92px;} /* color theme */
+  .app:not(.mobile-mode) #page-profile > .module-card > *:nth-child(2){align-items:center;}
+  .app:not(.mobile-mode) #page-profile > .module-card > *:nth-child(4){grid-column:1 / -1; margin:6px 0 18px;} /* class section */
+  .app:not(.mobile-mode) #page-profile > .module-card > *:nth-child(5){grid-column:1 / -1; justify-self:start;}  /* sign in/out */
+
+  /* class options sit in one row instead of wrapping */
+  .app:not(.mobile-mode) #page-profile .cp-options{grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px;}
+  .app:not(.mobile-mode) #page-profile .class-pick.compact{padding:18px 20px 14px;}
+  .app:not(.mobile-mode) #page-profile .class-pick.compact .cp-head h3{font-size:18px;}
+  .app:not(.mobile-mode) #page-profile .cp-name{font-size:18px; white-space:nowrap;}
+
+  /* =====================================================================
+     CLASS PICKER: computer icon instead of 1 / 2
+     ===================================================================== */
+  .cp-letter.cp-letter-pc{
+    background:linear-gradient(145deg, #ffffff 0%, var(--surface-2) 100%);
+    box-shadow:0 3px 0 var(--line), inset 0 2px 0 rgba(255,255,255,.9);
+    color:var(--teal-dark); overflow:visible;
+  }
+  .cp-pc{width:30px; height:30px; display:block; overflow:visible; transition:transform .2s cubic-bezier(.34,1.56,.64,1);}
+  .cp-pc .pc-bezel, .cp-pc .pc-stand, .cp-pc .pc-base{fill:currentColor;}
+  .cp-pc .pc-stand{opacity:.75;}
+  .cp-pc .pc-screen{fill:#fff; fill-opacity:.95;}
+  .cp-pc .pc-code{fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round;}
+  .cp-opt:hover .cp-pc{transform:translateY(-2px) rotate(-6deg) scale(1.1);}
+  .cp-opt.on .cp-letter-pc{box-shadow:0 3px 0 rgba(0,0,0,.18), 0 0 0 3px rgba(255,255,255,.35);}
+  .cp-opt.on .cp-pc .pc-screen{fill:var(--surface-2);}
+  .cp-opt.on .cp-pc .pc-code{animation:cpCode 1.6s ease-in-out infinite;}
+  @keyframes cpCode{0%,100%{opacity:1;} 50%{opacity:.35;}}
+  .app.mobile-mode .cp-pc{width:26px; height:26px;}
+  @media (prefers-reduced-motion: reduce){ .cp-opt.on .cp-pc .pc-code{animation:none;} .cp-pc{transition:none;} }
+
+/* =====================================================================
+   BOX POLISH: texture + tinted shadows that follow the active color theme
+   Everything below is built from the theme variables (--teal, --orange, --line, --surface),
+   so when a student switches theme the textures and glows recolor automatically.
+   ===================================================================== */
+:root{
+  --glow:      color-mix(in srgb, var(--teal) 24%, transparent);
+  --glow-soft: color-mix(in srgb, var(--teal) 13%, transparent);
+  --glow-warm: color-mix(in srgb, var(--orange) 30%, transparent);
+  --edge:      color-mix(in srgb, var(--teal) 30%, var(--line));
+  --sheen:     linear-gradient(155deg, rgba(255,255,255,.85) 0%, rgba(255,255,255,.25) 38%, rgba(255,255,255,0) 60%);
+  --wash:      linear-gradient(180deg, rgba(255,255,255,0) 50%, color-mix(in srgb, var(--teal) 8%, transparent) 100%);
+  --grain:     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .2  0 0 0 0 .2  0 0 0 0 .2  0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 160px 160px;
+  --stripes:   repeating-linear-gradient(135deg, color-mix(in srgb, var(--teal) 6%, transparent) 0 2px, transparent 2px 9px);
+  --lift:      0 1px 0 rgba(255,255,255,.95) inset, 0 -2px 0 color-mix(in srgb, var(--teal) 8%, transparent) inset;
 }
-.lx-cheat .lx-badge{background:#EFE9FB; box-shadow:0 4px 0 #D9CEF3;}
-.lx-txt{display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;}
-.lx-title{font-family:'Fredoka',sans-serif; font-weight:600; font-size:21px; line-height:1.2; color:var(--ink);}
-.lx-state{
-  display:inline-flex; align-items:center; gap:8px; flex:none; padding:8px 14px; border-radius:999px;
-  background:var(--surface); font-weight:700; font-size:13.5px; color:var(--teal-dark); transition:background .2s ease, color .2s ease;
+
+/* ---------- Big cards (white): glossy corner + dotted paper texture + colored glow ---------- */
+.game-card, .wu-card, .streak-card, .lesson-card, .fold, .cheat, .quiz-box, .module-card, .stat-card{
+  background:
+    var(--sheen),
+    var(--wash), var(--grain),
+    #fff;
 }
-.lx-chev{display:inline-block; font-size:16px; line-height:1; transition:transform .25s ease;}
-.lx-drop.open .lx-chev{transform:rotate(180deg);}
-.lx-drop.open .lx-state{background:var(--teal); color:#fff;}
-.lx-cheat.open .lx-state{background:#7C5CD6;}
-.lx-body{padding:6px 22px 24px;}
-.lx-body:not([hidden]){animation:lxOpen .3s ease;}
-@keyframes lxOpen{from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:none;}}
-.lx-body .cheat{margin:0; padding:0; border:0; border-radius:0; box-shadow:none; background:none; overflow:visible;}
-.lx-body .cheat::before{display:none;}
-.app.mobile-mode .lx-btn{padding:20px 14px 14px; gap:12px;}
-.app.mobile-mode .lx-title{font-size:18px;}
-.app.mobile-mode .lx-state{padding:8px 10px;}
-.app.mobile-mode .lx-state-text{display:none;}
-.app.mobile-mode .lx-body{padding:4px 14px 18px;}
-.app.mobile-mode .lx-body .cheat{padding:0;}
-@media (prefers-reduced-motion: reduce){ .lx-body:not([hidden]){animation:none;} .lx-chev, .lx-drop, .lx-state{transition:none;} }
+.game-card, .wu-card, .streak-card, .lesson-card{
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 2px 4px var(--glow-soft), 0 14px 30px var(--glow-soft), 0 6px 0 color-mix(in srgb, var(--teal) 14%, var(--line));
+}
+.fold{
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 10px 22px var(--glow-soft), 0 5px 0 color-mix(in srgb, var(--teal) 16%, var(--line));
+  transition:border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+.fold:hover{ transform:translateY(-2px); box-shadow:var(--lift), 0 16px 30px var(--glow), 0 5px 0 var(--teal); }
+.fold.open{ box-shadow:var(--lift), 0 16px 34px var(--glow), 0 5px 0 var(--teal); }
+.fold-ico, .cs-badge, .cp-ico{
+  background:var(--sheen), var(--wash), var(--grain), var(--surface-2);
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset, 0 4px 0 color-mix(in srgb, var(--teal) 18%, var(--line)), 0 8px 14px var(--glow-soft);
+}
+.fold-chev{ box-shadow:0 2px 0 color-mix(in srgb, var(--teal) 20%, var(--line)); }
+
+/* ---------- Question card + conversion boxes ---------- */
+.game-q-card{
+  background:var(--sheen), var(--stripes), var(--wash), var(--grain), var(--surface);
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 10px 22px var(--glow-soft), 0 4px 0 color-mix(in srgb, var(--teal) 18%, var(--line));
+}
+.game-q-label{
+  background:var(--sheen), #fff;
+  box-shadow:0 2px 0 color-mix(in srgb, var(--teal) 20%, var(--line)), 0 4px 10px var(--glow-soft);
+}
+.conv-box, .wu-q-part, .skp-eq .skp-num{
+  background:var(--sheen), var(--wash), var(--grain), #fff;
+}
+.conv-box{
+  box-shadow:var(--lift), 0 4px 0 color-mix(in srgb, var(--teal) 22%, var(--line)), 0 12px 22px var(--glow-soft);
+}
+.conv-box.from{
+  background:var(--sheen), var(--wash), var(--grain), color-mix(in srgb, var(--teal) 7%, #fff);
+  box-shadow:var(--lift), 0 4px 0 var(--teal), 0 14px 26px var(--glow);
+}
+.conv-box.to{
+  background:var(--stripes), #fff;
+  box-shadow:none;
+  border-color:color-mix(in srgb, var(--orange) 55%, var(--line));
+}
+.conv-box.to .conv-num{ text-shadow:0 2px 0 color-mix(in srgb, var(--orange) 22%, transparent); }
+.conv-num{ text-shadow:0 2px 0 color-mix(in srgb, var(--teal) 14%, transparent); }
+.wu-q-part{
+  background:var(--sheen), var(--wash), var(--grain), var(--surface);
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 4px 0 color-mix(in srgb, var(--teal) 20%, var(--line)), 0 12px 22px var(--glow-soft);
+}
+.wu-q-part:has(.wu-unknown){ background:var(--stripes), #fff; box-shadow:none; border-color:color-mix(in srgb, var(--orange) 55%, var(--line)); }
+.wu-num{ text-shadow:0 2px 0 color-mix(in srgb, var(--teal) 14%, transparent); }
+
+/* ---------- Answer buttons / options ---------- */
+.wu-opt, .game-opt, .quiz-option{
+  background:var(--sheen), var(--wash), var(--grain), var(--surface);
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 4px 0 color-mix(in srgb, var(--teal) 22%, var(--line)), 0 10px 16px var(--glow-soft);
+}
+.wu-opt:hover:not(:disabled), .game-opt:hover:not(:disabled){
+  background:var(--sheen), var(--wash), var(--grain), #fff;
+  box-shadow:var(--lift), 0 6px 0 var(--teal), 0 16px 24px var(--glow);
+}
+.wu-opt.correct, .game-opt.correct{
+  background:var(--sheen), var(--wash), var(--grain), color-mix(in srgb, var(--teal) 14%, #fff);
+  box-shadow:var(--lift), 0 4px 0 var(--teal), 0 12px 22px var(--glow);
+}
+.wu-opt.wrong, .game-opt.wrong{
+  background:var(--stripes), color-mix(in srgb, var(--orange) 16%, #fff);
+  box-shadow:0 4px 0 var(--orange-dark), 0 12px 22px var(--glow-warm);
+}
+
+/* ---------- Typing box ---------- */
+.game-input, .cs-conv-in, .cs-q-in{
+  background:var(--sheen), var(--wash), var(--grain), #fff;
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 4px 0 color-mix(in srgb, var(--teal) 22%, var(--line)), 0 12px 20px var(--glow-soft);
+}
+.game-input:focus, .cs-conv-in:focus, .cs-q-in:focus{
+  border-color:var(--teal);
+  box-shadow:var(--lift), 0 4px 0 var(--teal), 0 0 0 5px var(--glow), 0 16px 26px var(--glow);
+}
+
+/* ---------- Info boxes inside lessons / cheat sheet ---------- */
+.lesson-panel, .cs-sec, .cs-out, .cs-fact, .cs-map-i, .sc-stat, .stat-card, .cs-qbox, .cs-flip, .cs-bitouts div{
+  background:var(--sheen), var(--wash), var(--grain), var(--surface);
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 3px 0 color-mix(in srgb, var(--teal) 16%, var(--line)), 0 8px 16px var(--glow-soft);
+}
+.cs-sec{ background:var(--sheen), var(--wash), var(--grain), #fff; }
+.lesson-example, .cs-worked, .cs-flip{
+  background:var(--sheen), var(--stripes), #FFFBEA;
+  border-color:#F2D675;
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset, 0 3px 0 #EBCF72, 0 10px 18px rgba(214,170,40,.18);
+}
+.lesson-idea, .game-cta{
+  background:var(--sheen), var(--wash), var(--grain), linear-gradient(120deg, #E4F3EF, #FFF3C9);
+  box-shadow:var(--lift), 0 8px 18px var(--glow-soft);
+}
+.ex-line{ background:var(--sheen), #fff; box-shadow:0 2px 0 #F2E2A4; }
+.ref-chip, .cs-tile{
+  background:var(--sheen), var(--wash), var(--grain), var(--surface);
+  box-shadow:var(--lift), 0 3px 0 color-mix(in srgb, var(--teal) 20%, var(--line)), 0 8px 12px var(--glow-soft);
+}
+.cs-tile:hover{ box-shadow:var(--lift), 0 6px 0 var(--teal), 0 14px 22px var(--glow); }
+.cs-tile.on{ background:linear-gradient(145deg, var(--teal), var(--teal-dark)); box-shadow:0 3px 0 var(--teal-dark), 0 12px 22px var(--glow); }
+.cs-bit{ background:var(--sheen), #fff; box-shadow:var(--lift), 0 3px 0 color-mix(in srgb, var(--teal) 20%, var(--line)), 0 6px 10px var(--glow-soft); }
+.cs-bit.on{ background:linear-gradient(145deg, var(--teal), var(--teal-dark)); box-shadow:0 3px 0 var(--teal-dark), 0 8px 16px var(--glow); }
+.cs-detail{ background:var(--sheen), var(--wash), var(--grain), #fff; box-shadow:0 14px 30px var(--glow); }
+
+/* ---------- Problem bar on the sketch pad, solution box ---------- */
+.sk-problem{
+  background:var(--sheen), var(--stripes), #FFF3C9;
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset, 0 3px 0 #EBCF72, 0 10px 18px rgba(214,170,40,.18);
+}
+.game-solution{
+  background:var(--sheen), var(--stripes), #FFFBEA;
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset, 0 4px 0 #EBCF72, 0 14px 26px rgba(214,170,40,.2);
+}
+.sk-wrap{ box-shadow:var(--lift), 0 4px 0 color-mix(in srgb, var(--teal) 18%, var(--line)), 0 14px 26px var(--glow-soft); border-color:var(--edge); }
+
+/* ---------- Choosing screens: sections, topics, difficulty, class, game levels ---------- */
+.sec-card, .topic-grid-wide .topic-card, .game-level-card, .cp-opt, .adm-sec, .upload-row, .lecture-card{
+  background:var(--sheen), var(--wash), var(--grain), #fff;
+}
+.class-pick{
+  background:var(--sheen), var(--wash), var(--grain), #fff;
+  border-color:var(--edge);
+  box-shadow:var(--lift), 0 14px 28px var(--glow-soft), 0 5px 0 color-mix(in srgb, var(--teal) 16%, var(--line));
+}
+.cp-opt{ background:var(--sheen), var(--wash), var(--grain), var(--surface); box-shadow:var(--lift), 0 4px 0 color-mix(in srgb, var(--teal) 20%, var(--line)), 0 10px 16px var(--glow-soft); }
+.cp-opt.on{ background:linear-gradient(145deg, var(--teal), var(--teal-dark)); box-shadow:0 4px 0 var(--teal-dark), 0 14px 24px var(--glow); }
+.sec-card:hover, .topic-grid-wide .topic-card:hover{ background:var(--sheen), var(--wash), var(--grain), #fff; }
+.game-level-card{ box-shadow:var(--lift), 0 5px 0 var(--line), 0 12px 22px var(--glow-soft); }
+
+/* ---------- Buttons get a gloss so they feel pressable ---------- */
+.game-btn.primary, .wu-next, .next-btn.ready, .res-bar-btn.right, .browse-btn, .res-link-btn, .login-submit{
+  background-image:linear-gradient(180deg, rgba(255,255,255,.28), rgba(255,255,255,0) 55%);
+  text-shadow:0 1px 0 rgba(0,0,0,.18);
+}
+.game-btn.ghost, .res-bar-btn.left, .res-back-btn, .sk-btn, .cs-qbtn{
+  background-image:var(--sheen);
+}
+
+/* ---------- Progress pips glow ---------- */
+.game-pips .pip.ok{ background:linear-gradient(180deg, color-mix(in srgb, var(--teal) 70%, #fff), var(--teal)); box-shadow:0 2px 6px var(--glow); }
+.game-pips .pip.no{ background:linear-gradient(180deg, color-mix(in srgb, var(--orange) 70%, #fff), var(--orange)); box-shadow:0 2px 6px var(--glow-warm); }
+
+/* ---------- Phone bars ---------- */
+.topnav{ box-shadow:0 6px 18px var(--glow-soft); }
+.bottom-nav{ box-shadow:0 -6px 18px var(--glow-soft); }
+
+@media (prefers-reduced-motion: reduce){ .fold{ transition:none; } .fold:hover{ transform:none; } }
