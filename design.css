@@ -1341,14 +1341,17 @@
   .bit-grp{display:inline-block; margin:0 .18em;}
   .conv-sub{font-size:11.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-soft);}
   .conv-arrow{align-self:center; font-family:'Fredoka',sans-serif; font-size:30px; font-weight:700; color:var(--teal-dark);}
-  .app.mobile-mode .conv-row{gap:8px;}
-  .app.mobile-mode .conv-box{min-width:130px; padding:12px 14px 10px;}
+  .app.mobile-mode .conv-row{gap:8px; flex-wrap:nowrap;}
+  .app.mobile-mode .conv-box{min-width:0; flex:1.5 1 0; padding:12px 12px 10px;}
+  .app.mobile-mode .conv-box.to{flex:.8 1 0;}
+  .app.mobile-mode .conv-arrow{flex:none;}
   .app.mobile-mode .conv-num{font-size:26px;}
   .app.mobile-mode .conv-arrow{font-size:24px;}
   @media (max-width:520px){
-    .conv-row{flex-direction:column; align-items:center;}
-    .conv-box{width:100%; min-width:0;}
-    .conv-arrow{transform:rotate(90deg);}
+    .conv-row{flex-wrap:nowrap; gap:8px;}
+    .conv-box{flex:1.5 1 0; min-width:0; padding:12px 10px 10px;}
+    .conv-box.to{flex:.8 1 0;}
+    .conv-arrow{font-size:22px; flex:none;}
   }
 
   .game-input{letter-spacing:.08em;}
@@ -1420,7 +1423,10 @@
   .wu-unknown{color:var(--orange-dark);}
   .app.mobile-mode .wu-num{font-size:28px;}
   .app.mobile-mode .wu-q-part{min-width:0; padding:12px 16px 8px;}
-  .app.mobile-mode .wu-q-arrow{transform:rotate(90deg); font-size:24px;}
+  .app.mobile-mode .wu-q-arrow{font-size:24px; flex:none;}
+  .app.mobile-mode .wu-question{flex-wrap:nowrap; gap:8px;}
+  .app.mobile-mode .wu-q-part{flex:1 1 0; min-width:0;}
+  .app.mobile-mode .wu-q-part:has(.wu-unknown){flex:.8 1 0;}
 
   /* ---------- Topic cards: difficulty mix ---------- */
   .topic-meta{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:4px;}
@@ -1937,11 +1943,12 @@
     font-size:13px; letter-spacing:.16em; text-transform:uppercase; box-shadow:0 4px 0 rgba(0,0,0,.2);
   }
   .hero-chips{position:relative; z-index:2; display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin:0 auto 28px;}
+  .hero-chips{gap:6px 18px; pointer-events:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent;}
   .hero-chips span{
-    font-family:'Fredoka', sans-serif; font-weight:600; font-size:13.5px; color:#0F2B2B;
-    background:rgba(255,255,255,.7); border:2px solid rgba(18,36,42,.85); border-radius:999px; padding:6px 16px;
-    box-shadow:0 3px 0 rgba(18,36,42,.85);
+    font-family:'Fredoka', sans-serif; font-weight:600; font-size:14px; letter-spacing:.04em; color:rgba(15,43,43,.78);
+    background:none; border:0; border-radius:0; padding:0; box-shadow:none;
   }
+  .hero-chips span + span::before{content:'\2022'; margin-right:18px; opacity:.5;}
   .hero-sub{margin-bottom:20px;}
   @media (max-width:640px){
     .hero-brand{gap:8px;}
@@ -2089,3 +2096,78 @@
   .dp-card, .dp-orb, .dp-rocket, .dp-banner{animation:none !important;}
   .dp-card, .dp-play b, .dp-card::after{transition:none !important;}
 }
+
+
+/* ===== HOME WARM-UP: Show solution ===== */
+.wu-actions{display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:12px; margin-top:14px;}
+.wu-actions .wu-next{margin:0;}
+.wu-sol-btn{
+  background:#fff; color:var(--orange-dark); border:2px solid var(--orange); font-weight:700; font-size:14px;
+  padding:10px 22px; border-radius:999px; box-shadow:0 4px 0 var(--orange); cursor:pointer;
+  transition:transform .12s, box-shadow .12s;
+}
+.wu-sol-btn:active{transform:translateY(3px); box-shadow:none;}
+.wu-sol-btn:focus-visible{outline:3px solid var(--orange); outline-offset:3px;}
+.wu-solution{
+  margin:16px auto 0; max-width:560px; text-align:left; padding:18px 20px;
+  border-radius:var(--radius-md); background:#FFFBEA; border:2px solid #F2D675;
+}
+.wu-solution[hidden]{display:none;}
+.wu-solution:not([hidden]){animation:fadein .3s ease;}
+
+/* ===== ARITHMETIC QUESTIONS: "up and down" (column) format ===== */
+.vq-wrap{justify-content:center;}
+.conv-box.vq-box{flex:0 1 auto; min-width:min(250px, 100%); padding:18px 28px 12px;}
+.vq{
+  display:inline-grid; grid-template-columns:auto auto; align-items:center; justify-items:end;
+  column-gap:.3em; row-gap:.06em;
+  font-family:'Fredoka',sans-serif; font-weight:600; font-size:40px; line-height:1.15; color:var(--ink);
+}
+.vq i{display:inline-block; width:.62em; font-style:normal; text-align:center;}
+.vq-sign{justify-self:center; min-width:.8em; text-align:center; color:var(--teal-dark); font-size:.9em;}
+.vq-num{display:inline-flex; justify-content:flex-end; white-space:nowrap;}
+.vq-line{grid-column:1 / -1; justify-self:stretch; height:4px; border-radius:3px; background:var(--ink); margin:.1em 0 .14em;}
+.vq-unknown{color:var(--orange-dark); background:#fff; border:2px dashed var(--line); border-radius:12px; padding:0 .55em;}
+.vq-divisor{justify-self:end; align-self:end; display:inline-flex; padding-right:.28em;}
+.vq-dividend{
+  justify-self:start; display:inline-flex; padding:.04em .22em 0 .3em;
+  border-top:4px solid var(--ink); border-left:4px solid var(--ink); border-top-left-radius:.55em;
+}
+.app.mobile-mode .vq{font-size:28px;}
+.app.mobile-mode .conv-box.vq-box{flex:0 1 auto; min-width:min(210px, 100%); padding:14px 18px 10px;}
+@media (max-width:380px){ .app.mobile-mode .vq{font-size:25px;} }
+
+/* ===== CHEAT SHEET: "More examples" box scrolls after a few examples (scrollbar hidden) ===== */
+.cs-exgrid{position:relative;}
+.cs-exgrid.scrolls{
+  overflow-y:auto; overscroll-behavior-y:auto; scrollbar-width:none; -ms-overflow-style:none; padding:2px 3px;
+  -webkit-mask-image:linear-gradient(to bottom, #000 calc(100% - 30px), transparent);
+          mask-image:linear-gradient(to bottom, #000 calc(100% - 30px), transparent);
+}
+.cs-exgrid.scrolls::-webkit-scrollbar{display:none; width:0; height:0;}
+.cs-exgrid.scrolls.at-end{-webkit-mask-image:none; mask-image:none;}
+.cs-exgrid:focus-visible{outline:3px solid var(--orange); outline-offset:3px; border-radius:14px;}
+.cs-scrollnote{font-weight:700; color:var(--teal-dark);}
+
+/* ===== GAME PAGE ===== */
+.gm-step{display:none;}
+.gm-step.active{display:block; animation:fadein .35s ease;}
+.gm-section{margin-bottom:30px;}
+.gm-section .section-label{margin-top:22px;}
+.gm-section:first-child .section-label{margin-top:0;}
+.play-cta{
+  display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:30px; padding:22px 24px;
+  border-radius:22px; border:2px solid var(--line); box-shadow:0 5px 0 var(--line);
+  background:linear-gradient(100deg, #EAF6F1 0%, #FFF6DC 100%);
+}
+.play-cta-ico{font-size:40px; line-height:1; flex:none;}
+.play-cta-text{flex:1 1 240px; min-width:0;}
+.play-cta-text h4{margin:0 0 4px; font-family:'Fredoka',sans-serif; font-size:21px; color:var(--ink);}
+.play-cta-text p{margin:0; font-size:14.5px; line-height:1.5; color:var(--ink-soft);}
+.play-cta-btn{flex:none;}
+@media (max-width:640px){ .play-cta-btn{width:100%;} }
+.app.mobile-mode .play-cta-btn{width:100%;}
+.conv-box.vq-box .conv-sub{margin-top:10px;}
+/* long numbers (more than 8 digits, e.g. 16-bit binary) get a smaller font on small screens so they wrap in two lines */
+@media (max-width:520px){ .conv-num.long{font-size:20px;} }
+.app.mobile-mode .conv-num.long{font-size:20px;}
