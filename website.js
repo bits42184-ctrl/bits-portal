@@ -26,15 +26,26 @@ function goToPage(name){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   if(name === 'admin') loadAdminDashboard();
+  if(name !== 'home') stopAllLessonVideos();
+  if(name === 'game') gameHubEnter();
   document.querySelectorAll('#navLinks button, #bottomNav button').forEach(b=>{
     b.classList.toggle('active', b.dataset.page===name);
   });
 }
 document.querySelectorAll('#navLinks button, #bottomNav button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    if(btn.dataset.page === 'home') goHome(); else goToPage(btn.dataset.page);
+    if(btn.dataset.page === 'home') goHome();
+    else if(btn.dataset.page === 'game') goGame();
+    else goToPage(btn.dataset.page);
   });
 });
+
+// Takes the student to the Game page, back to its first screen (choose a topic), the same way Home works
+function goGame(){
+  goToPage('game');
+  showGameStep('topics');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
 
 // Takes the student to the Home page, back to its first screen (works from any page or lesson)
 function goHome(){
@@ -244,7 +255,7 @@ function renderClassPickers(){
     box.classList.toggle('need', !classSection);
     if(opts) opts.innerHTML = CLASS_SECTIONS.map(label => {
       const on = label === classSection, letter = label.split(' - ').pop();
-      return `<button type="button" class="cp-opt ${on ? 'on' : ''}" role="radio" aria-checked="${on}" data-sec="${escapeHtml(label)}" onclick="setClassSection(this.dataset.sec)">
+      return `<button type="button" class="cp-opt ${on ? 'on' : ''}" aria-pressed="${on}" data-sec="${escapeHtml(label)}" onclick="setClassSection(this.dataset.sec)">
         <span class="cp-letter" aria-hidden="true">${escapeHtml(letter)}</span>
         <span class="cp-name">${escapeHtml(label)}</span>
         <span class="cp-check" aria-hidden="true">\u2713</span>
@@ -253,20 +264,27 @@ function renderClassPickers(){
     if(note){
       note.classList.remove('err');
       note.textContent = !classSection ? ''
-        : currentUser ? `\u2705 You are in ${classSection}. Picked the wrong one? Tap another section to change it.`
-        : `You picked ${classSection}. Sign in with Google so your teacher can see your progress.`;
+        : currentUser ? `\u2705 You are in ${classSection}. Tap it again to unselect it, or tap another section to change it.`
+        : `You picked ${classSection}. Tap it again to unselect it. Sign in with Google so your teacher can see your progress.`;
     }
   });
 }
 
+// Tapping a section chooses it. Tapping the SAME section a second time un-chooses it.
 async function setClassSection(label){
-  if(CLASS_SECTIONS.indexOf(label) < 0 || label === classSection) return;
+  if(CLASS_SECTIONS.indexOf(label) < 0) return;
   const prev = classSection;
-  classSection = label; renderClassPickers();
-  if(!currentUser){ classPendingSet(label); return; }
+  const next = (label === classSection) ? null : label;
+  classSection = next; renderClassPickers();
+  if(!currentUser){ classPendingSet(next); return; }
   try{
-    await db.collection('users').doc(currentUser.uid).set({ classSection: label, classSectionAt: Date.now() }, {merge:true});
-    logActivity('class_selected', prev ? `${label} (was ${prev})` : label, { classSection: label });
+    if(next){
+      await db.collection('users').doc(currentUser.uid).set({ classSection: next, classSectionAt: Date.now() }, {merge:true});
+      logActivity('class_selected', prev ? `${next} (was ${prev})` : next, { classSection: next });
+    } else {
+      await db.collection('users').doc(currentUser.uid).set({ classSection: firebase.firestore.FieldValue.delete(), classSectionAt: Date.now() }, {merge:true});
+      logActivity('class_cleared', prev, { classSection: null });
+    }
   }catch(err){
     console.error(err);
     classSection = prev; renderClassPickers();
@@ -1034,6 +1052,7 @@ function buildArithTopic(op, diff){
       : `Work out the ${O.result} of these binary numbers and write it in binary.`;
     return {
       level: diff, q, num: `${arFmt(a, 2)} ${O.show} ${arFmt(b, 2)}`, expr: true,
+      v: { a: arFmt(a, 2), b: arFmt(b, 2), sym: O.show, op },
       from: 2, to: 2, base: 2, answer: arFmt(res, 2), solution: arithSolution(op, a, b, res, 2, 2)
     };
   });
@@ -1218,16 +1237,14 @@ function chooseLevel(levelKey){
 }
 
 // Topic cards, grouped under labels (Binary and decimal, Binary and octal, ...).
-function renderTopics(levelKey){
+// `pickFn` is the name of the function a card calls when it is tapped (the lessons and the Game page each use their own).
+function topicGroupsHtml(levelKey, pickFn){
   const level = LEVELS[levelKey];
-  document.getElementById('topicsHeading').textContent = level.name;
-  const intro = document.getElementById('topicsIntro'); if(intro && level.intro) intro.textContent = level.intro;
-  document.getElementById('topicGroups').innerHTML = level.groups.map(group => `
+  return level.groups.map(group => `
     <div class="topic-group-label tone-${group.tone}"><span class="tg-dot"></span>${escapeHtml(group.label)}</div>
     <div class="topic-grid topic-grid-wide">
-      ${group.families.map(f => {
-        return `
-        <button class="topic-card tone-${group.tone}" onclick="openFamily('${levelKey}', '${f.key}')">
+      ${group.families.map(f => `
+        <button class="topic-card tone-${group.tone}" onclick="${pickFn}('${levelKey}', '${f.key}')">
           <span class="topic-icon${f.small ? ' topic-icon-sm' : ''}">${escapeHtml(f.icon)}</span>
           <span class="topic-text">
             <span class="topic-title">${escapeHtml(f.title)}</span>
@@ -1236,24 +1253,27 @@ function renderTopics(levelKey){
               ${DIFFS.map(lv => `<span class="topic-mix mix-${lv}"><i></i>${DIFF_NAME[lv]}</span>`).join('')}
             </span>
           </span>
-          </span>
           <span class="topic-arrow">\u2192</span>
-        </button>`;
-      }).join('')}
+        </button>`).join('')}
     </div>`).join('');
 }
+function renderTopics(levelKey){
+  const level = LEVELS[levelKey];
+  document.getElementById('topicsHeading').textContent = level.name;
+  const intro = document.getElementById('topicsIntro'); if(intro && level.intro) intro.textContent = level.intro;
+  document.getElementById('topicGroups').innerHTML = topicGroupsHtml(levelKey, 'openFamily');
+}
 
-// Topic card clicked: show the "Choose your difficulty" screen (Easy / Medium / Hard).
+// The "Choose your difficulty" screen (Easy / Medium / Hard) for one topic.
+// `pickFn` is the function a level card calls: openTopic (lesson) or gamePlay (Game page).
 const LEVEL_UI = {
   easy:   { desc: 'Warm-up questions to get you started', bars: 1 },
   medium: { desc: 'A bit trickier. Time to think!',        bars: 2 },
   hard:   { desc: 'Challenge mode for math champions',     bars: 3 }
 };
-function openFamily(levelKey, familyKey){
-  const fam = familiesOf(levelKey).find(f => f.key === familyKey);
-  if(!fam) return;
+function familyLevelsHtml(levelKey, fam, pickFn){
   const level = LEVELS[levelKey];
-  document.getElementById('levelsBody').innerHTML = `
+  return `
     <div class="res-header">
       <span class="res-badge${fam.icon.length >= 3 ? ' res-badge-sm' : ''}">${escapeHtml(fam.icon)}</span>
       <div>
@@ -1270,7 +1290,7 @@ function openFamily(levelKey, familyKey){
       ${fam.topics.map((t, i) => {
         const U = LEVEL_UI[t.diff];
         return `
-        <button type="button" class="dp-card dp-${t.diff}" style="--i:${i};" onclick="openTopic('${levelKey}', '${t.key}')" aria-label="${DIFF_NAME[t.diff]} level: ${escapeHtml(fam.title)}">
+        <button type="button" class="dp-card dp-${t.diff}" style="--i:${i};" onclick="${pickFn}('${levelKey}', '${t.key}')" aria-label="${DIFF_NAME[t.diff]} level: ${escapeHtml(fam.title)}">
           <span class="dp-orb" aria-hidden="true"></span>
           <span class="dp-name">${DIFF_NAME[t.diff]}</span>
           <span class="dp-desc">${U.desc}</span>
@@ -1279,6 +1299,12 @@ function openFamily(levelKey, familyKey){
         </button>`;
       }).join('')}
     </div>`;
+}
+// Topic card clicked (lessons): show its Easy / Medium / Hard screen.
+function openFamily(levelKey, familyKey){
+  const fam = familiesOf(levelKey).find(f => f.key === familyKey);
+  if(!fam) return;
+  document.getElementById('levelsBody').innerHTML = familyLevelsHtml(levelKey, fam, 'openTopic');
   showWizardStep('levels');
   window.scrollTo({ top:0, behavior:'smooth' });
 }
@@ -1390,9 +1416,7 @@ function showTopicResources(levelKey, topic){
     ? videoHtml + (cardsHtml ? `<div class="res-grid">${cardsHtml}</div>` : '')
     : topic.lesson ? renderLesson(topic)
     : `<div class="res-empty"><span>🚧</span><h4>Lesson materials coming soon</h4><p>The video, slides and assessment for ${escapeHtml(topic.title)} will be added here.</p></div>`;
-  document.getElementById('resBody').insertAdjacentHTML('beforeend', '<div id="gameMount"></div><div id="sketchMount"></div>');
-  gameInit(topic);
-  sketchInit(topic);
+  document.getElementById('resBody').insertAdjacentHTML('beforeend', playCtaHtml(topic));
   markActiveToday();
   showWizardStep('resources');
 }
@@ -1777,14 +1801,45 @@ function csExamplesPane(kind){
   list.forEach(e => { if(tags.indexOf(e.tag) < 0) tags.push(e.tag); });
   const label = { toDec:'To decimal', fromDec:'From decimal', group: kind === 'oct' ? 'Binary \u21C4 octal' : 'Binary \u21C4 hex' };
   const chips = ['all', ...tags].map((t, i) => `<button type="button" class="cs-base ${i === 0 ? 'on' : ''}" data-tag="${t}" aria-pressed="${i === 0}" onclick="csExFilter(this)">${t === 'all' ? 'All (' + list.length + ')' : label[t]}</button>`).join('');
-  return `<p class="cs-hint"><span aria-hidden="true">\uD83D\uDCDD</span> ${list.length} worked examples. Pick a type, then follow the steps.</p>
+  return `<p class="cs-hint"><span aria-hidden="true">\uD83D\uDCDD</span> ${list.length} worked examples. Pick a type, then follow the steps.<span class="cs-scrollnote" hidden> Scroll inside the box to see them all.</span></p>
     <div class="cs-bases cs-exfilter" role="group" aria-label="Filter examples">${chips}</div>
-    <div class="cs-dgrid cs-exgrid">${list.map(csExHtml).join('')}</div>`;
+    <div class="cs-dgrid cs-exgrid" tabindex="0" role="region" aria-label="Worked examples" onscroll="csExScroll(this)">${list.map(csExHtml).join('')}</div>`;
 }
+
+// HOW MANY EXAMPLES SHOW BEFORE THE BOX SCROLLS (the scrollbar is hidden). Change this number to show more or fewer.
+// On a computer the examples sit in 2 columns, so the box always ends on a full row.
+const CS_EXAMPLES_VISIBLE = 5;
+// The box is never taller than this share of the screen height, so it always fits on a phone (0.7 = 70%).
+const CS_EXAMPLES_MAX_SCREEN = 0.7;
+function csExFit(pane){
+  const grid = pane && pane.querySelector('.cs-exgrid'); if(!grid) return;
+  const note = pane.querySelector('.cs-scrollnote');
+  grid.style.maxHeight = ''; grid.classList.remove('scrolls', 'at-end'); grid.scrollTop = 0;
+  if(note) note.hidden = true;
+  const cards = Array.from(grid.querySelectorAll('.cs-excard')).filter(c => !c.hidden);
+  if(cards.length <= CS_EXAMPLES_VISIBLE || !grid.offsetParent) return;
+  const rowTop = cards[CS_EXAMPLES_VISIBLE - 1].offsetTop;
+  let edge = 0;
+  cards.forEach(c => { if(c.offsetTop <= rowTop + 1) edge = Math.max(edge, c.offsetTop + c.offsetHeight); });
+  if(edge + 40 >= grid.scrollHeight) return;                 // everything already fits
+  const wanted = Math.ceil(edge + 34);                       // the last 34px peeks at the next example
+  const cap = Math.max(260, Math.round(window.innerHeight * CS_EXAMPLES_MAX_SCREEN));
+  grid.style.maxHeight = Math.min(wanted, cap) + 'px';
+  grid.classList.add('scrolls');
+  if(note) note.hidden = false;
+  csExScroll(grid);
+}
+function csExScroll(grid){ grid.classList.toggle('at-end', grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 4); }
+let csExResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(csExResizeTimer);
+  csExResizeTimer = setTimeout(() => document.querySelectorAll('.cs-pane[data-pane="examples"]:not([hidden])').forEach(csExFit), 150);
+});
 function csExFilter(btn){
   const pane = btn.closest('.cs-pane'), tag = btn.dataset.tag;
   pane.querySelectorAll('.cs-exfilter .cs-base').forEach(b => { const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
   pane.querySelectorAll('.cs-excard').forEach(c => { c.hidden = !(tag === 'all' || c.dataset.tag === tag); });
+  csExFit(pane);
 }
 
 /* ----- Practice tab: random questions, checked by the program ----- */
@@ -2190,6 +2245,7 @@ function csTab(btn){
   root.querySelectorAll('.cs-tab').forEach(t => { const on = t === btn; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
   root.querySelectorAll('.cs-pane').forEach(p => { p.hidden = p.dataset.pane !== btn.dataset.tab; });
   if(btn.dataset.tab === 'conv') csConvRun(root.querySelector('.cs-conv'));
+  if(btn.dataset.tab === 'examples') csExFit(root.querySelector('.cs-pane[data-pane="examples"]'));
   if(btn.dataset.tab === 'quiz'){ const qz = root.querySelector('.cs-quiz'); if(qz && qz.dataset.ready !== '1') csQuizNew(qz); }
 }
 
@@ -2273,6 +2329,7 @@ function formatWhen(ms){
 function describeActivity(a){
   if(a.type === 'game_played') return `played <b>${escapeHtml(a.detail || 'a mini game')}</b>`;
   if(a.type === 'class_selected') return `chose class section <b>${escapeHtml(a.detail)}</b>`;
+  if(a.type === 'class_cleared') return `unselected class section <b>${escapeHtml(a.detail)}</b>`;
   if(a.type === 'topic_opened') return `opened the ${escapeHtml(a.detail)} lesson`;
   return escapeHtml(a.type || 'did something');
 }
@@ -2502,6 +2559,7 @@ function newWarmup(){
   fb.textContent = 'Pick an answer!';
   fb.className = 'wu-feedback';
   document.getElementById('wuNext').classList.remove('show');
+  wuResetSolution();
   document.getElementById('wuStreak').textContent = wuStreak;
   document.getElementById('wuBest').textContent = wuBest;
   document.getElementById('wuCount').textContent = wuCount;
@@ -2541,6 +2599,29 @@ function answerWarmup(btn){
   document.getElementById('wuNext').classList.add('show');
 }
 
+// "Show solution" for the warm-up: the same step-by-step help the mini games give.
+const WU_KEY = { 2:'bin', 8:'oct', 10:'dec', 16:'hex' };
+function wuSolutionSteps(){
+  if(!wuCurrent) return [];
+  const T = WU_TYPES[wuCurrent.type];
+  const item = CONV_ITEMS[WU_KEY[T.from] + '-' + WU_KEY[T.to]];
+  return item ? convSolution(item, wuCurrent.n) : [];
+}
+function wuResetSolution(){
+  const box = document.getElementById('wuSolution'), btn = document.getElementById('wuSolBtn');
+  if(box) box.hidden = true;
+  if(btn){ btn.textContent = '\uD83D\uDCA1 Show solution'; btn.setAttribute('aria-expanded', 'false'); }
+}
+function toggleWarmupSolution(){
+  const box = document.getElementById('wuSolution'), btn = document.getElementById('wuSolBtn');
+  if(!box || !btn || !wuCurrent) return;
+  if(!box.hidden){ wuResetSolution(); return; }
+  const steps = wuSolutionSteps().map((t, i) => `<li><span class="gs-num">${i + 1}</span><span>${escapeHtml(t)}</span></li>`).join('');
+  box.innerHTML = `<div class="gs-head">\uD83D\uDCA1 How to solve it</div><ol class="gs-steps">${steps}</ol><div class="gs-answer"><span>Final answer</span><b>${escapeHtml(wuCurrent.answer)}</b></div>`;
+  box.hidden = false;
+  btn.textContent = '\uD83D\uDCA1 Hide solution'; btn.setAttribute('aria-expanded', 'true');
+}
+
 newWarmup();
 
 
@@ -2577,6 +2658,27 @@ function convDisplayNum(num, base, isExpr){
   const groups = [];
   for(let i = text.length; i > 0; i -= 4) groups.unshift(text.slice(Math.max(0, i - 4), i));
   return groups.map(g => `<span class="bit-grp">${escapeHtml(g)}</span>`).join('');
+}
+
+// Arithmetic questions are drawn "up and down", like on paper:
+//    add / subtract / multiply:  first number, then the sign and the second number, then a line, then the ? answer slot
+//    divide:                     long division (divisor on the left, dividend under the bar, ? answer on top)
+const VQ_WORD = { add:'plus', sub:'minus', mul:'times', div:'divided by' };
+function vqDigits(s){ return String(s).split('').map(ch => `<i>${escapeHtml(ch)}</i>`).join(''); }
+function vqHtml(v){
+  const label = `${v.a} ${VQ_WORD[v.op]} ${v.b}`;
+  if(v.op === 'div'){
+    return `<div class="vq vq-div" role="img" aria-label="${escapeHtml(label)}">
+      <span class="vq-sign"></span><span class="vq-num vq-unknown">?</span>
+      <span class="vq-divisor">${vqDigits(v.b)}</span><span class="vq-dividend">${vqDigits(v.a)}</span>
+    </div>`;
+  }
+  return `<div class="vq" role="img" aria-label="${escapeHtml(label)}">
+      <span class="vq-sign"></span><span class="vq-num">${vqDigits(v.a)}</span>
+      <span class="vq-sign">${escapeHtml(v.sym)}</span><span class="vq-num">${vqDigits(v.b)}</span>
+      <span class="vq-line"></span>
+      <span class="vq-sign"></span><span class="vq-num vq-unknown">?</span>
+    </div>`;
 }
 
 function correctAnswer(q){
@@ -2718,9 +2820,12 @@ function renderGame(){
     const steps = (q && q.solution && q.solution.length ? q.solution : [null,null,null]).map((t,i)=>`
         <li><span class="gs-num">${i+1}</span><span class="${t===null?'placeholder':''}">${t===null ? 'Step ' + (i+1) + ' of the solution will appear here.' : escapeHtml(t)}</span></li>`).join('');
 
-    const conv = (q && q.num) ? `
+    const conv = (q && q.v) ? `
+        <div class="conv-row vq-wrap">
+          <div class="conv-box from vq-box">${vqHtml(q.v)}<span class="conv-sub">${baseLabel(q.from)}</span></div>
+        </div>` : (q && q.num) ? `
         <div class="conv-row">
-          <div class="conv-box from"><b class="conv-num${q.expr ? ' expr' : ''}">${convDisplayNum(q.num, q.from, q.expr)}</b><span class="conv-sub">${baseLabel(q.from)}</span></div>
+          <div class="conv-box from"><b class="conv-num${q.expr ? ' expr' : ''}${String(q.num).replace(/\s/g, '').length > 8 ? ' long' : ''}">${convDisplayNum(q.num, q.from, q.expr)}</b><span class="conv-sub">${baseLabel(q.from)}</span></div>
           <span class="conv-arrow" aria-hidden="true">→</span>
           <div class="conv-box to"><b class="conv-num">?</b><span class="conv-sub">${baseLabel(q.to)}</span></div>
         </div>` : '';
@@ -2814,6 +2919,98 @@ function gameNext(){
 }
 
 function gameRestart(){ gameInit(gameState.topic); }
+
+
+/* ================= GAME PAGE =================
+   The mini game lives on its own page so a lesson is not crowded.
+   Flow: choose a topic -> choose Easy / Medium / Hard -> play (problem, answer box, sketchpad).
+   Students get here from the Game tab, or from the "Play the mini game" card at the bottom of a lesson. */
+let gameRef = null;            // { levelKey, topicKey } of the level on screen
+let gameHubBuilt = false;
+const GAME_SCROLL_TOP = () => window.scrollTo({ top:0, behavior:'smooth' });
+
+function showGameStep(name){
+  document.querySelectorAll('#page-game .gm-step').forEach(s => s.classList.toggle('active', s.id === 'gm-' + name));
+}
+function renderGameTopics(){
+  const el = document.getElementById('gmTopicGroups'); if(!el) return;
+  el.innerHTML = SECTION_ORDER.map(k => `
+    <div class="gm-section">
+      <div class="section-label"><h3>${escapeHtml(LEVELS[k].name)}</h3></div>
+      ${topicGroupsHtml(k, 'gameOpenFamily')}
+    </div>`).join('');
+}
+function gameHubEnter(){
+  if(!gameHubBuilt){ renderGameTopics(); gameHubBuilt = true; }
+}
+function gameOpenFamily(levelKey, familyKey){
+  const fam = familiesOf(levelKey).find(f => f.key === familyKey);
+  if(!fam) return;
+  document.getElementById('gmLevelsBody').innerHTML = familyLevelsHtml(levelKey, fam, 'gamePlay');
+  showGameStep('levels');
+  GAME_SCROLL_TOP();
+}
+function gameBackToTopicList(){ showGameStep('topics'); GAME_SCROLL_TOP(); }
+
+function gamePlay(levelKey, topicKey){
+  const topic = allTopicsOf(levelKey).find(t => t.key === topicKey);
+  if(!topic) return;
+  gameRef = { levelKey, topicKey };
+  const list = allTopicsOf(levelKey);
+  const isLast = list.findIndex(t => t.key === topicKey) >= list.length - 1;
+  const badge = document.getElementById('gmBadge');
+  badge.textContent = topic.icon;
+  badge.classList.toggle('res-badge-sm', topic.icon.length >= 3);
+  document.getElementById('gmEyebrow').textContent = LEVELS[levelKey].name + (topic.diff ? ' \u00B7 ' + DIFF_NAME[topic.diff] : '');
+  document.getElementById('gmTitle').textContent = topic.title;
+  document.getElementById('gmNextBtn').textContent = isLast ? 'All topics \u2713' : 'Next Level \u2192';
+  gameInit(topic);          // problem + answer box
+  sketchInit(topic);        // sketchpad
+  markActiveToday();
+  showGameStep('play');
+  GAME_SCROLL_TOP();
+}
+// Back from the play screen: return to that topic's Easy / Medium / Hard cards.
+function gameBackToPick(){
+  const fam = gameRef && familyOf(gameRef.levelKey, gameRef.topicKey);
+  if(fam){ gameOpenFamily(gameRef.levelKey, fam.key); return; }
+  showGameStep('topics'); GAME_SCROLL_TOP();
+}
+// Next goes Easy, Medium, Hard, then on to the next topic's Easy.
+function gameNextLevel(){
+  if(!gameRef) return;
+  const list = allTopicsOf(gameRef.levelKey);
+  const idx = list.findIndex(t => t.key === gameRef.topicKey);
+  if(idx >= 0 && idx < list.length - 1) gamePlay(gameRef.levelKey, list[idx + 1].key);
+  else { showGameStep('topics'); GAME_SCROLL_TOP(); }
+}
+// "Open lesson" on the play screen: go to the lesson for the same level.
+function gameOpenLesson(){
+  if(!gameRef) return;
+  const topic = allTopicsOf(gameRef.levelKey).find(t => t.key === gameRef.topicKey);
+  if(!topic) return;
+  goToPage('home');
+  showTopicResources(gameRef.levelKey, topic);
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+// The card at the bottom of every lesson.
+function playCtaHtml(topic){
+  return `
+    <div class="play-cta">
+      <span class="play-cta-ico" aria-hidden="true">\uD83C\uDFAE</span>
+      <div class="play-cta-text">
+        <h4>Ready to practice?</h4>
+        <p>Play the mini game for ${escapeHtml(topic.title)}${topic.diff ? ' (' + DIFF_NAME[topic.diff] + ')' : ''}. You solve the problems, type your answers, and get a sketchpad for your working out.</p>
+      </div>
+      <button type="button" class="game-btn primary play-cta-btn" onclick="playFromLesson()">Play the mini game \u2192</button>
+    </div>`;
+}
+function playFromLesson(){
+  if(!currentTopicRef) return;
+  goToPage('game');                       // also stops any lesson video
+  gameHubEnter();
+  gamePlay(currentTopicRef.levelKey, currentTopicRef.topicKey);
+}
 
 
 /* ================= STREAK CALENDAR (tracks the days a student practiced) ================= */
