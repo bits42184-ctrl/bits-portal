@@ -2593,3 +2593,37 @@
 .bottom-nav{ box-shadow:0 -6px 18px var(--glow-soft); }
 
 @media (prefers-reduced-motion: reduce){ .fold{ transition:none; } .fold:hover{ transform:none; } }
+
+
+/* =====================================================================
+   GLOSSY ORBS on the mini game's "Choose your difficulty" cards
+   (same look as the orbs on the Easy / Medium / Hard lesson picker)
+   ===================================================================== */
+.game-level-card{
+  --cl:#A6E8CB; --glow-o:rgba(63,174,134,.34); --ring-o:#CDEBDD; --orb-dark:#2B8566;
+}
+.game-level-card.lv-medium{ --cl:#FFE89E; --glow-o:rgba(224,178,50,.42);  --ring-o:#F6E3A0; --orb-dark:#946D0A; }
+.game-level-card.lv-hard{   --cl:#FFAFA9; --glow-o:rgba(229,88,79,.34);   --ring-o:#F8C9C5; --orb-dark:#B3261E; }
+
+.game-level-card .gl-emoji{
+  position:relative; width:78px; height:78px; margin:4px 0 12px; border-radius:50%;
+  font-size:0; line-height:0; color:transparent;           /* hides the little emoji dot */
+  background:radial-gradient(circle at 34% 28%, #fff 0 6%, var(--cl) 9%, var(--tone) 50%, var(--orb-dark) 100%);
+  box-shadow:0 0 0 8px rgba(255,255,255,.92), 0 0 0 10px var(--ring-o), 0 14px 22px var(--glow-o), inset 0 -6px 10px rgba(0,0,0,.14);
+  animation:dpBob 3.2s ease-in-out infinite;
+}
+.game-level-card.lv-medium .gl-emoji{ animation-delay:-1s; }
+.game-level-card.lv-hard .gl-emoji{   animation-delay:-2s; }
+.game-level-card .gl-emoji::after{                          /* the white shine spot */
+  content:''; position:absolute; top:13%; left:19%; width:30%; height:17%; border-radius:50%;
+  background:rgba(255,255,255,.8); transform:rotate(-28deg);
+}
+.game-level-card:hover .gl-emoji{ box-shadow:0 0 0 8px rgba(255,255,255,.95), 0 0 0 10px var(--tone), 0 18px 28px var(--glow-o), inset 0 -6px 10px rgba(0,0,0,.14); }
+.game-level-card .gl-name{ margin-top:2px; }
+
+@media (prefers-reduced-motion: reduce){ .game-level-card .gl-emoji{ animation:none; } }
+
+/* difficulty cards that cannot be played (no questions) */
+.dp-card:disabled{ opacity:.5; cursor:not-allowed; transform:none !important; box-shadow:0 6px 0 var(--line) !important; }
+/* inside the white mini game card, give the title a little room */
+.game-card .dp-title{ margin-top:6px; }
