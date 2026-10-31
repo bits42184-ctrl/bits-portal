@@ -3962,7 +3962,7 @@ if(location.hash) routeApply(location.hash);
     <header class="qg-head"><div class="qg-head-txt"><span class="qg-kick">🧭 Your guide</span><h3>BITS Quest Guide</h3><p id="qgSub"></p></div>
       <div class="qg-bigring">${ring('')}<b id="qgBig">0/${QUESTS.length}</b></div><button type="button" class="qg-x" aria-label="Close guide">✕</button></header>
     <div class="qg-segs" id="qgSegs"></div><div class="qg-list" id="qgList"></div>
-    <footer class="qg-foot"><button type="button" class="qg-tourbtn btn-3d" id="qgTour">▶ Take the 30-second tour</button><button type="button" class="qg-reset" id="qgReset">Reset checklist</button></footer></section>`);
+    <footer class="qg-foot"><button type="button" class="qg-tourbtn btn-3d" id="qgTour">▶ Take the 30-second tour</button><button type="button" class="qg-reset" id="qgReset">Reset checklist</button><button type="button" class="qg-reset" id="qgHide">Hide this button</button></footer></section>`);
   const hello = make('<div class="qg-hello" role="status"><b>👋 New here?</b>Take a quick tour and I’ll show you around BITS.<div><button type="button" class="y">Show me!</button><button type="button" class="n">Maybe later</button></div></div>');
   const toastEl = make('<div class="qg-toast" role="status" aria-live="polite"></div>');
   [scrim, panel, hello, toastEl, fab].forEach(n => document.body.appendChild(n));
@@ -4009,6 +4009,20 @@ if(location.hash) routeApply(location.hash);
   $('qgReset').addEventListener('click', () => { S.done = {}; S.party = false; save(); render(); toast('Checklist reset'); autoCheck(); });
   hello.querySelector('.y').addEventListener('click', () => { hideHello(); startTour(fullTour(), false); });
   hello.querySelector('.n').addEventListener('click', hideHello);
+
+  /* ---------- hide / show the floating ? button (saved on this device; also a switch in Profile) ---------- */
+  function applyHidden(){
+    const h = !!S.hidden;
+    fab.style.display = h ? 'none' : '';
+    if(h){ closePanel(); hideHello(); }
+    const t = $('guideToggle'); if(t) t.setAttribute('aria-checked', String(!h));
+  }
+  function toggleHidden(){
+    S.hidden = !S.hidden; save(); applyHidden();
+    toast(S.hidden ? 'Guide button hidden. Turn it back on in Profile.' : 'Guide button is back.');
+  }
+  window.toggleGuideButton = toggleHidden;
+  $('qgHide').addEventListener('click', toggleHidden);
 
   /* ---------- spotlight tour ---------- */
   let T = null;
@@ -4097,8 +4111,8 @@ if(location.hash) routeApply(location.hash);
   wrap('showTopicResources', () => mark('lesson'));
 
   /* ---------- first-visit hello bubble ---------- */
-  if(!S.hello && !S.seen) setTimeout(() => { if(!S.seen && !T && !isOpen()){ S.hello = true; save(); hello.classList.add('show'); } }, 2600);
-  render(); autoCheck();
+  if(!S.hello && !S.seen) setTimeout(() => { if(!S.seen && !S.hidden && !T && !isOpen()){ S.hello = true; save(); hello.classList.add('show'); } }, 2600);
+  render(); autoCheck(); applyHidden();
   /* ---------- Cheat sheet walkthrough (button sits at the top of every cheat sheet) ---------- */
   window.startCheatTour = function(btn){
     const root = btn.closest('.cheat'); if(!root) return;
