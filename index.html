@@ -72,7 +72,7 @@
           <div class="hero-tagline">Binary Instruction Training System</div>
 
           <h2 class="hero-heading" id="greetingHeading">Fall in love with solving problems</h2>
-          <p class="hero-sub">Master binary, octal and hexadecimal, one conversion at a time. Pick a topic and let's go!</p>
+          <p class="hero-sub">Master binary, octal, decimal and hexadecimal, one conversion at a time. Pick a topic and let's go!</p>
           <div class="hero-chips" aria-hidden="true"><span>Binary</span><span>Octal</span><span>Decimal</span><span>Hex</span></div>
           <button class="btn-3d hero-cta" onclick="openSections()"><span class="ico">✨</span> Start Learning</button>
         </div>
@@ -287,40 +287,74 @@
 
     <!-- ============ ADMIN DASHBOARD (only shown to the admin account) ============ -->
     <section class="page" id="page-admin">
-      <div class="section-label" style="margin-top:0;">
-        <h3>Admin Dashboard</h3>
-        <span class="count" id="adminStudentCount">0 students</span>
+      <div class="adm-top">
+        <div>
+          <h3 class="adm-title">Admin Dashboard</h3>
+          <p class="adm-sub">Everything your students do on BITS. Only your account can see this page.</p>
+        </div>
+        <div class="adm-top-actions">
+          <button type="button" class="lecture-action-btn" onclick="exportAdminCsv()">⬇ Export CSV</button>
+          <button type="button" class="lecture-action-btn" id="adminRefreshBtn" onclick="loadAdminDashboard(true)">↻ Refresh</button>
+        </div>
       </div>
-      <p class="admin-intro">Everything your students do on BITS. Only your account can see this page.</p>
+      <div class="adm-updated" aria-live="polite">
+        <span id="adminUpdatedTxt"></span>
+        <span class="adm-load" id="adminLoad" hidden><i id="adminLoadFill"></i></span>
+      </div>
+      <div class="adm-state" id="adminLoadingMsg">Loading students…</div>
 
-      <div class="adm-toolbar">
-        <div class="section-label" style="margin:0;"><h3>Class sections</h3></div>
-        <button type="button" class="lecture-action-btn" onclick="loadAdminDashboard()">↻ Refresh</button>
-      </div>
-      <p class="admin-intro" style="margin-bottom:12px;">Tap a section to see only its students and recent activity.</p>
       <div class="adm-sections" id="adminSections"></div>
 
-      <div class="stats-row">
-        <div class="stat-card"><div class="num" id="adminTotalStudents">0</div><div class="label">Students</div></div>
-        <div class="stat-card"><div class="num" id="adminActiveToday">0</div><div class="label">Active in last 24h</div></div>
-        <div class="stat-card"><div class="num" id="adminActiveWeek">0</div><div class="label">Active in last 7 days</div></div>
-        <div class="stat-card"><div class="num" id="adminGamesPlayed">0</div><div class="label">Games played (recent)</div></div>
-      </div>
+      <div class="adm-kpis" id="adminKpis"></div>
 
-      <div class="section-label"><h3 id="adminStudentsTitle">Students</h3></div>
-      <p class="admin-intro" style="margin-bottom:10px;">Click a student to see what they did recently.</p>
-      <div id="adminLoadingMsg" class="admin-intro">Loading student data...</div>
-      <div style="overflow-x:auto;">
-        <table class="admin-table" id="adminStudentTable" style="display:none;">
-          <thead>
-            <tr><th>Name</th><th>Email</th><th>Section</th><th>Level</th><th>Streak</th><th>Games</th><th>Last active</th></tr>
-          </thead>
-          <tbody id="adminStudentRows"></tbody>
-        </table>
-      </div>
+      <details class="adm-panel" id="adminWalkPanel" open>
+        <summary class="adm-panel-h">
+          <span class="adm-panel-t"><b>🧭 Walkthrough progress</b><small>How far students got in the BITS Quest Guide</small></span>
+          <span class="adm-panel-s" id="adminWalkSum"></span>
+          <span class="adm-chev" aria-hidden="true">▾</span>
+        </summary>
+        <div class="adm-wk" id="adminWalk"></div>
+        <p class="adm-note adm-wk-note">A student shows up here after their next visit to the site. Students who have not opened the guide yet count as “Not started”.</p>
+      </details>
 
-      <div class="section-label"><h3 id="adminFeedTitle">Recent activity</h3></div>
-      <div id="adminActivityList" class="admin-activity"></div>
+      <section class="adm-panel" id="adminStudentsPanel">
+        <div class="adm-panel-h static">
+          <span class="adm-panel-t"><b id="adminStudentsTitle">Students</b><small id="adminListCount"></small></span>
+        </div>
+        <div class="adm-tools">
+          <label class="adm-search">
+            <span class="adm-search-ico" aria-hidden="true">🔍</span>
+            <input type="search" id="adminSearch" placeholder="Search name, email, level or section…" autocomplete="off" oninput="admSearchInput(this.value)" aria-label="Search students">
+          </label>
+          <label class="adm-sortsel">
+            <span class="sr-only">Sort students by</span>
+            <select class="adm-select" id="adminSort" onchange="admSortSelect(this.value)">
+              <option value="recent">Sort: Last active</option>
+              <option value="name">Sort: Name (A–Z)</option>
+              <option value="walk">Sort: Walkthrough</option>
+              <option value="streak">Sort: Streak</option>
+              <option value="games">Sort: Games</option>
+              <option value="section">Sort: Section</option>
+              <option value="level">Sort: Level</option>
+            </select>
+          </label>
+        </div>
+        <div class="adm-chips" id="adminChips" role="group" aria-label="Filter students"></div>
+        <div class="adm-list">
+          <div class="adm-cols adm-cols-head" id="adminColHead">
+            <button type="button" class="adm-th" data-sort="name" onclick="admSortBy('name')">Student <span class="adm-arrow"></span></button>
+            <button type="button" class="adm-th" data-sort="section" onclick="admSortBy('section')">Section <span class="adm-arrow"></span></button>
+            <button type="button" class="adm-th" data-sort="level" onclick="admSortBy('level')">Level <span class="adm-arrow"></span></button>
+            <button type="button" class="adm-th" data-sort="streak" onclick="admSortBy('streak')">Streak <span class="adm-arrow"></span></button>
+            <button type="button" class="adm-th" data-sort="games" onclick="admSortBy('games')">Games <span class="adm-arrow"></span></button>
+            <button type="button" class="adm-th" data-sort="walk" onclick="admSortBy('walk')">Walkthrough <span class="adm-arrow"></span></button>
+            <button type="button" class="adm-th" data-sort="recent" onclick="admSortBy('recent')">Last active <span class="adm-arrow"></span></button>
+            <span></span>
+          </div>
+          <div id="adminRows"></div>
+        </div>
+        <div class="adm-pager" id="adminPager"></div>
+      </section>
     </section>
   </main>
 
