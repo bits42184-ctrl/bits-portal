@@ -12,7 +12,8 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 
 // Only this exact Google account sees the Admin dashboard. Change it to YOUR email if needed.
-const ADMIN_EMAIL = "gaadrian2009@gmail.com";
+const ADMIN_EMAILS = ["gaadrian2009@gmail.com", "darwintuibuen@gmail.com"];   // add more accounts here to give them the Admin tab
+const isAdminEmail = e => !!e && ADMIN_EMAILS.indexOf(String(e).toLowerCase()) >= 0;
 
 // Cloudinary handles actual file storage (Firebase Storage now requires billing to enable)
 const CLOUDINARY_CLOUD_NAME = "n9stqvzo";
@@ -2172,6 +2173,7 @@ function renderCheat(topic){
   const tabBtns = tabs.map((t, i) => `<button type="button" role="tab" class="cs-tab ${i === 0 ? 'on' : ''}" data-tab="${t.id}" aria-selected="${i === 0}" onclick="csTab(this)"><span aria-hidden="true">${t.icon}</span> ${t.label}</button>`).join('');
   return `
     <div class="cheat" data-kind="${kind}">
+      <div class="cs-walkrow"><button type="button" class="cs-walk" onclick="startCheatTour(this)"><span aria-hidden="true">🧭</span> Walk me through this</button></div>
       <div class="cs-tabsbar"><div class="cs-tabs" role="tablist">${tabBtns}</div></div>
       <div class="cs-body">
         <div class="cs-pane" data-pane="explore" role="tabpanel">${csExploreFrame(kind)}</div>
@@ -2312,7 +2314,7 @@ function logGamePlay(section, levelKey){
 // Shows/hides the Admin tab. This only controls what's VISIBLE — the real protection
 // is the Firestore security rules, which stop anyone else from reading other students' data.
 function updateAdminAccess(email){
-  const isAdmin = !!email && email === ADMIN_EMAIL;
+  const isAdmin = isAdminEmail(email);
   document.getElementById('adminNavBtn').style.display = isAdmin ? 'inline-flex' : 'none';
   document.getElementById('adminBottomNavBtn').style.display = isAdmin ? 'flex' : 'none';
   if(!isAdmin && document.getElementById('page-admin').classList.contains('active')) goToPage('home');
@@ -2331,126 +2333,347 @@ function describeActivity(a){
   return escapeHtml(a.type || 'did something');
 }
 
-// ----- Admin: students grouped by class section (ICT - 1, ICT - 2) -----
+// ----- Admin dashboard: section cards, walkthrough progress, and a searchable / sortable / paged student list -----
 const ADMIN_NONE = '__none';
-let adminStudents = [], adminFilter = 'all';
+const ADMIN_QUEST_FALLBACK = [   // only used if the Quest Guide has not loaded; the real list comes from window.BITS_QUESTS
+  { id:'signin', ico:'🔐', t:'Sign in with Google' }, { id:'class', ico:'🏫', t:'Choose your class section' },
+  { id:'warmup', ico:'🎯', t:'Answer a warm-up question' }, { id:'lesson', ico:'📘', t:'Open a lesson' },
+  { id:'game', ico:'🎮', t:'Visit the Game arena' }, { id:'profile', ico:'👤', t:'Check your profile' }
+];
+const ADM_FILTERS = [['all','All'], ['today','Active today'], ['week','Active this week'], ['idle','Inactive 7d+'], ['wdone','Walkthrough finished'], ['wnot','Walkthrough unfinished']];
+const ADM_SIZES = [10, 25, 50, 100];
+const ADM_DEFAULT_DIR = { name:'asc', section:'asc', level:'asc' };
+const adm = { students:[], section:'all', q:'', filter:'all', sort:'recent', dir:'desc', page:1, size:25, open:new Set(), feedMore:false, loadedAt:0, token:0, actDone:0, actTotal:0 };
+try{ const n = parseInt(localStorage.getItem('bitsAdminPageSize'), 10); if(ADM_SIZES.indexOf(n) >= 0) adm.size = n; }catch(_){}
 
+function adminQuests(){ return (window.BITS_QUESTS && window.BITS_QUESTS.length) ? window.BITS_QUESTS : ADMIN_QUEST_FALLBACK; }
 // Which admin group a student belongs to. Anyone without a valid class section is "No section yet".
 function adminKey(s){ return CLASS_SECTIONS.indexOf(s.classSection) >= 0 ? s.classSection : ADMIN_NONE; }
-function adminInSection(key){ return key === 'all' ? adminStudents : adminStudents.filter(s => adminKey(s) === key); }
 function adminLabel(key){ return key === 'all' ? 'All students' : key === ADMIN_NONE ? 'No section yet' : key; }
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-function setAdminSection(key){ adminFilter = key; renderAdmin(); }
+function timeAgo(ms){
+  if(!ms) return 'Never';
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if(s < 60) return 'Just now';
+  if(s < 3600) return Math.floor(s / 60) + ' min ago';
+  if(s < 86400) return Math.floor(s / 3600) + ' h ago';
+  if(s < 86400 * 7) return Math.floor(s / 86400) + ' d ago';
+  return new Date(ms).toLocaleDateString(undefined, { month:'short', day:'numeric' });
+}
+// Walkthrough (Quest Guide) progress of one student, read from users/{uid}.questProgress
+function admQuest(s){
+  const qs = adminQuests(), qp = (s.qp && typeof s.qp === 'object') ? s.qp : null;
+  const done = (qp && qp.done && typeof qp.done === 'object') ? qp.done : {};
+  const n = qs.filter(q => done[q.id]).length;
+  return { started: !!qp, done, n, total: qs.length, tour: !!(qp && qp.tour), pct: qs.length ? Math.round(n / qs.length * 100) : 0 };
+}
+function admHue(id){ let h = 0; for(let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
+function admInitials(name){
+  const first = w => Array.from(w)[0] || '';
+  const p = String(name).replace(/@.*/, '').trim().split(/[\s._-]+/).filter(Boolean);
+  return ((p.length ? first(p[0]) : '?') + (p.length > 1 ? first(p[p.length - 1]) : '')).toUpperCase();
+}
+// only touch the DOM when the markup really changed (keeps open dropdowns / focus / scroll steady while data streams in)
+function admSet(el, html){ if(el && el._h !== html){ el.innerHTML = html; el._h = html; } }
 
-function toggleAdminStudent(id){
-  const row = document.querySelector(`tr.adm-row[data-id="${CSS.escape(id)}"]`), det = document.querySelector(`tr.adm-detail[data-for="${CSS.escape(id)}"]`);
-  if(!row || !det) return;
-  const open = det.hidden;
-  det.hidden = !open; row.classList.toggle('open', open); row.setAttribute('aria-expanded', open);
+/* ---------- filtering, sorting, paging ---------- */
+const ADM_CMP = {
+  recent:  (a, b) => a.lastActive - b.lastActive,
+  name:    (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity:'base' }),
+  section: (a, b) => adminKey(a).localeCompare(adminKey(b)),
+  level:   (a, b) => String(a.level).localeCompare(String(b.level)),
+  streak:  (a, b) => a.streak - b.streak,
+  games:   (a, b) => a.games - b.games,
+  walk:    (a, b) => a.wk.n - b.wk.n
+};
+function admBase(){ return adm.section === 'all' ? adm.students : adm.students.filter(s => adminKey(s) === adm.section); }
+function admMatch(s, f, t){
+  switch(f){
+    case 'today': return s.lastActive > t.day;
+    case 'week':  return s.lastActive > t.week;
+    case 'idle':  return s.lastActive <= t.week;
+    case 'wdone': return s.wk.total > 0 && s.wk.n >= s.wk.total;
+    case 'wnot':  return s.wk.n < s.wk.total;
+    default:      return true;
+  }
+}
+function admVisible(){
+  adm.students.forEach(s => { s.wk = admQuest(s); });
+  const now = Date.now(), t = { day: now - 864e5, week: now - 6048e5 };
+  let list = admBase();
+  const words = adm.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if(words.length) list = list.filter(s => {
+    const hay = (s.name + ' ' + s.email + ' ' + s.level + ' ' + (adminKey(s) === ADMIN_NONE ? '' : s.classSection)).toLowerCase();
+    return words.every(w => hay.indexOf(w) >= 0);
+  });
+  const counts = {}; ADM_FILTERS.forEach(f => { counts[f[0]] = list.filter(s => admMatch(s, f[0], t)).length; });
+  list = list.filter(s => admMatch(s, adm.filter, t));
+  const cmp = ADM_CMP[adm.sort] || ADM_CMP.recent, sign = adm.dir === 'asc' ? 1 : -1;
+  list.sort((a, b) => (cmp(a, b) || a.name.localeCompare(b.name, undefined, { sensitivity:'base' })) * sign);
+  return { list, counts };
+}
+
+/* ---------- user actions ---------- */
+function setAdminSection(key){ adm.section = key; adm.page = 1; renderAdmin(); }
+function admSetFilter(k){ adm.filter = k; adm.page = 1; admRenderStudents(); }
+function admSortBy(k){
+  if(adm.sort === k) adm.dir = adm.dir === 'asc' ? 'desc' : 'asc';
+  else { adm.sort = k; adm.dir = ADM_DEFAULT_DIR[k] || 'desc'; }
+  adm.page = 1; admRenderStudents();
+}
+function admSortSelect(k){ adm.sort = k; adm.dir = ADM_DEFAULT_DIR[k] || 'desc'; adm.page = 1; admRenderStudents(); }
+let admSearchTimer = 0;
+function admSearchInput(v){ clearTimeout(admSearchTimer); admSearchTimer = setTimeout(() => { adm.q = v; adm.page = 1; admRenderStudents(); }, 150); }
+function admSetSize(v){ const n = parseInt(v, 10); if(ADM_SIZES.indexOf(n) < 0) return; adm.size = n; adm.page = 1; try{ localStorage.setItem('bitsAdminPageSize', String(n)); }catch(_){} admRenderStudents(); }
+function admGoPage(p){
+  adm.page = p; admRenderStudents();
+  const panel = document.getElementById('adminStudentsPanel'); if(panel) panel.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+function admClear(){ adm.q = ''; adm.filter = 'all'; adm.page = 1; const i = document.getElementById('adminSearch'); if(i) i.value = ''; admRenderStudents(); }
+
+function admToggle(id){
+  const item = document.querySelector(`.adm-item[data-id="${CSS.escape(id)}"]`); if(!item) return;
+  const more = item.querySelector('.adm-more'), line = item.querySelector('.adm-line'), open = more.hidden;
+  const s = adm.students.find(x => x.id === id); if(!s) return;
+  if(open){
+    adm.open.add(id); more.innerHTML = admDetail(s);
+    if(!s.actLoaded) admFetchActivity(s).then(() => admSoon(true));
+  } else adm.open.delete(id);
+  more.hidden = !open; item.classList.toggle('open', open); line.setAttribute('aria-expanded', open);
+  const list = document.getElementById('adminRows'); if(list) list._h = null;   // force the next refresh to rebuild rows from state
+}
+
+/* ---------- data loading ---------- */
+function admFetchActivity(s){
+  if(s.actPromise) return s.actPromise;
+  s.actPromise = db.collection('users').doc(s.id).collection('activity').orderBy('at', 'desc').limit(40).get().then(snap => {
+    s.activity = snap.docs.map(a => { const d = a.data(); return { ...d, ms: (d.at && d.at.toMillis) ? d.at.toMillis() : 0 }; }).sort((x, y) => y.ms - x.ms);
+    s.games = s.activity.filter(a => a.type === 'game_played').length;
+  }).catch(err => { console.error(err); s.actErr = true; }).then(() => { s.actLoaded = true; });
+  return s.actPromise;
+}
+let admTimer = 0;
+function admSoon(now){
+  if(now){ clearTimeout(admTimer); admTimer = 0; renderAdmin(); return; }
+  if(!admTimer) admTimer = setTimeout(() => { admTimer = 0; renderAdmin(); }, 400);
+}
+// Loads every student's recent activity in the background (6 at a time) so a big class never blocks the page.
+async function admLoadAllActivity(token){
+  const queue = adm.students.slice();
+  adm.actTotal = queue.length; adm.actDone = 0;
+  const worker = async () => {
+    while(queue.length && token === adm.token){
+      const s = queue.shift(); await admFetchActivity(s); adm.actDone++; admSoon();
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+  if(token === adm.token) admSoon(true);
+}
+
+async function loadAdminDashboard(force){
+  if(!currentUser || !isAdminEmail(currentUser.email)) return;
+  // opening the tab again within 2 minutes just shows what is already loaded (use Refresh for a new pull)
+  if(!force && adm.students.length && Date.now() - adm.loadedAt < 120000){ renderAdmin(); return; }
+
+  const token = ++adm.token;
+  const msg = document.getElementById('adminLoadingMsg'), btn = document.getElementById('adminRefreshBtn');
+  if(!adm.students.length){ msg.hidden = false; msg.className = 'adm-state'; msg.textContent = 'Loading students…'; }
+  btn.disabled = true;
+  try{
+    const usersSnap = await db.collection('users').get();
+    if(token !== adm.token) return;
+    adm.students = usersSnap.docs.map(doc => {
+      const u = doc.data();
+      return {
+        id: doc.id, name: u.displayName || u.email || '(no name)', email: u.email || '', level: u.level || '\u2014',
+        classSection: classNormalize(u.classSection || ''),
+        streak: calcStreaks(new Set(Array.isArray(u.activeDays) ? u.activeDays : [])).current,
+        lastActive: u.lastSeenAt || u.lastLoginTimestamp || 0,
+        qp: u.questProgress || null,
+        activity: [], games: 0, actLoaded: false, actErr: false
+      };
+    });
+    adm.loadedAt = Date.now();
+    msg.hidden = true;
+    renderAdmin();
+    admLoadAllActivity(token);
+  } catch(err){
+    console.error(err);
+    msg.hidden = false; msg.className = 'adm-state err';
+    msg.textContent = `Couldn't load student data (${err.message}). Make sure the admin Firestore rules have been published.`;
+  } finally {
+    if(token === adm.token) btn.disabled = false;
+  }
+}
+
+/* ---------- rendering ---------- */
+function admDetail(s){
+  const qs = adminQuests(), w = s.wk || admQuest(s);
+  const sec = adminKey(s) === ADMIN_NONE ? 'Not set' : s.classSection;
+  const quests = qs.map(q => {
+    const v = w.done[q.id], ok = !!v;
+    const when = ok ? ((typeof v === 'number' && v > 1e11) ? formatWhen(v) : 'Done') : 'Not yet';
+    return `<div class="adm-q ${ok ? 'ok' : ''}"><i aria-hidden="true">${ok ? '\u2713' : ''}</i><span>${escapeHtml(q.ico || '')} ${escapeHtml(q.t)}</span><small>${when}</small></div>`;
+  }).join('');
+  const walk = w.started
+    ? `<div class="adm-qlist">${quests}</div><p class="adm-note">Guided tour: <b>${w.tour ? 'taken' : 'not taken yet'}</b></p>`
+    : `<p class="adm-note">No walkthrough data yet. It appears after this student next opens the site.</p>`;
+  let ev;
+  if(!s.actLoaded) ev = '<p class="adm-note">Loading activity…</p>';
+  else if(s.actErr) ev = '<p class="adm-note">Couldn\u2019t load this student\u2019s activity.</p>';
+  else if(!s.activity.length) ev = '<p class="adm-note">No activity recorded yet.</p>';
+  else ev = `<div class="adm-events">${s.activity.slice(0, 8).map(a => `<div class="adm-ev"><span class="adm-ev-t">${formatWhen(a.ms)}</span><span>${describeActivity(a)}</span></div>`).join('')}</div>`;
+  return `<div class="adm-meta"><span>\u2709 ${escapeHtml(s.email || 'no email')}</span><span>Level: <b>${escapeHtml(s.level)}</b></span><span>Section: <b>${escapeHtml(sec)}</b></span></div>
+    <div class="adm-more-grid"><div><h4>Walkthrough \u00B7 ${w.n}/${w.total}</h4>${walk}</div><div><h4>Recent activity</h4>${ev}</div></div>`;
+}
+
+function admRow(s, t){
+  const id = escapeHtml(s.id), w = s.wk, open = adm.open.has(s.id);
+  const active = s.lastActive > t.day ? 'on' : s.lastActive > t.week ? 'wk' : '';
+  const sec = adminKey(s) === ADMIN_NONE ? '<span class="adm-badge none">Not set</span>' : `<span class="adm-badge">${escapeHtml(s.classSection)}</span>`;
+  return `<div class="adm-item ${open ? 'open' : ''}" data-id="${id}">
+    <div class="adm-line adm-cols" role="button" tabindex="0" aria-expanded="${open}" title="Click to see walkthrough and recent activity" onclick="admToggle(this.parentNode.dataset.id)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();admToggle(this.parentNode.dataset.id);}">
+      <div class="adm-who"><span class="adm-av" style="--h:${admHue(s.id)}" aria-hidden="true">${escapeHtml(admInitials(s.name))}</span><span class="adm-who-t"><b>${escapeHtml(s.name)}</b><small>${escapeHtml(s.email)}</small></span></div>
+      <div class="adm-c adm-c-sec">${sec}</div>
+      <div class="adm-c adm-c-lvl">${escapeHtml(s.level)}</div>
+      <div class="adm-c adm-c-str">${s.streak} \uD83D\uDD25</div>
+      <div class="adm-c adm-c-gm">${s.actLoaded ? s.games : '\u2013'}<span class="adm-unit"> games</span></div>
+      <div class="adm-c adm-c-wk"><div class="adm-wkcell ${w.n >= w.total && w.total ? 'full' : ''}" title="${w.n} of ${w.total} quests done"><div class="adm-meter"><i style="width:${w.pct}%"></i></div><span>${w.n}/${w.total}</span></div></div>
+      <div class="adm-c adm-c-last" title="${s.lastActive ? escapeHtml(formatWhen(s.lastActive)) : 'Never'}"><span class="adm-dot ${active}" aria-hidden="true"></span>${timeAgo(s.lastActive)}</div>
+      <span class="adm-caret" aria-hidden="true">\u25B8</span>
+    </div>
+    <div class="adm-more" ${open ? '' : 'hidden'}>${open ? admDetail(s) : ''}</div>
+  </div>`;
+}
+
+function admRenderStudents(){
+  const { list, counts } = admVisible();
+  const t = { day: Date.now() - 864e5, week: Date.now() - 6048e5 };
+  const size = adm.size, pages = Math.max(1, Math.ceil(list.length / size));
+  if(adm.page > pages) adm.page = pages;
+  if(adm.page < 1) adm.page = 1;
+  const from = (adm.page - 1) * size, slice = list.slice(from, from + size);
+  const total = admBase().length;
+
+  document.getElementById('adminStudentsTitle').textContent = adm.section === 'all' ? 'Students' : `Students \u00B7 ${adminLabel(adm.section)}`;
+  document.getElementById('adminListCount').textContent = list.length === total ? plural(total, 'student') : `${list.length} of ${plural(total, 'student')}`;
+
+  admSet(document.getElementById('adminChips'), ADM_FILTERS.map(([k, label]) =>
+    `<button type="button" class="adm-chip ${adm.filter === k ? 'on' : ''}" aria-pressed="${adm.filter === k}" onclick="admSetFilter('${k}')">${label}<em>${counts[k]}</em></button>`).join(''));
+
+  document.querySelectorAll('#adminColHead .adm-th').forEach(b => {
+    const on = b.dataset.sort === adm.sort;
+    b.classList.toggle('on', on);
+    b.querySelector('.adm-arrow').textContent = on ? (adm.dir === 'asc' ? '\u25B2' : '\u25BC') : '';
+  });
+  const sel = document.getElementById('adminSort'); if(sel && sel.value !== adm.sort) sel.value = adm.sort;
+
+  // keep keyboard focus on the same row if the list is rebuilt while data streams in
+  const act = document.activeElement, focusId = (act && act.closest && act.closest('.adm-item')) ? act.closest('.adm-item').dataset.id : null;
+  const rows = document.getElementById('adminRows');
+  admSet(rows, slice.length
+    ? slice.map(s => admRow(s, t)).join('')
+    : (total
+        ? `<div class="adm-empty"><b>No students match</b><span>Try a different search or filter.</span><button type="button" class="lecture-action-btn" onclick="admClear()">Clear search &amp; filters</button></div>`
+        : `<div class="adm-empty"><b>${adm.students.length ? `No students in ${escapeHtml(adminLabel(adm.section))} yet` : 'No students yet'}</b><span>They appear here after they sign in.</span></div>`));
+  if(focusId){ const f = rows.querySelector(`.adm-item[data-id="${CSS.escape(focusId)}"] .adm-line`); if(f && f !== document.activeElement) f.focus({ preventScroll:true }); }
+
+  // pager
+  const pager = document.getElementById('adminPager');
+  if(!list.length){ admSet(pager, ''); return; }
+  const nums = [];
+  for(let p = 1; p <= pages; p++){ if(p === 1 || p === pages || Math.abs(p - adm.page) <= 1) nums.push(p); else if(nums[nums.length - 1] !== '\u2026') nums.push('\u2026'); }
+  admSet(pager, `<span class="adm-range">Showing <b>${from + 1}\u2013${Math.min(list.length, from + size)}</b> of <b>${list.length}</b></span>
+    <div class="adm-pages" ${pages <= 1 ? 'hidden' : ''}>
+      <button type="button" class="adm-pg" ${adm.page === 1 ? 'disabled' : ''} onclick="admGoPage(${adm.page - 1})" aria-label="Previous page">\u2039</button>
+      ${nums.map(n => n === '\u2026' ? '<span class="adm-gap">\u2026</span>' : `<button type="button" class="adm-pg ${n === adm.page ? 'on' : ''}" ${n === adm.page ? 'aria-current="page"' : ''} onclick="admGoPage(${n})">${n}</button>`).join('')}
+      <button type="button" class="adm-pg" ${adm.page === pages ? 'disabled' : ''} onclick="admGoPage(${adm.page + 1})" aria-label="Next page">\u203A</button>
+    </div>
+    <label class="adm-size">Rows per page <select class="adm-select" onchange="admSetSize(this.value)">${ADM_SIZES.map(n => `<option value="${n}" ${n === adm.size ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`);
+}
+
+function admRenderSections(){
+  const dayAgo = Date.now() - 864e5;
+  const inSec = key => key === 'all' ? adm.students : adm.students.filter(s => adminKey(s) === key);
+  const cards = [{ key:'all', icon:'\uD83D\uDC65' }, ...CLASS_SECTIONS.map(s => ({ key:s, icon:'\uD83C\uDFEB' }))];
+  if(inSec(ADMIN_NONE).length) cards.push({ key:ADMIN_NONE, icon:'\u2754' });
+  admSet(document.getElementById('adminSections'), cards.map(c => {
+    const list = inSec(c.key), act = list.filter(s => s.lastActive > dayAgo).length, on = c.key === adm.section;
+    return `<button type="button" class="adm-sec ${on ? 'on' : ''}" data-key="${escapeHtml(c.key)}" aria-pressed="${on}" onclick="setAdminSection(this.dataset.key)">
+      <span class="adm-sec-ico" aria-hidden="true">${c.icon}</span>
+      <span class="adm-sec-body"><b>${escapeHtml(adminLabel(c.key))}</b><span>${plural(list.length, 'student')} \u00B7 ${act} active today</span></span>
+    </button>`;
+  }).join(''));
+}
+
+function admRenderKpis(base){
+  const now = Date.now(), dayAgo = now - 864e5, weekAgo = now - 6048e5;
+  const stats = base.map(s => s.wk);
+  const avg = stats.length ? Math.round(stats.reduce((a, w) => a + w.pct, 0) / stats.length) : 0;
+  const fin = stats.filter(w => w.total && w.n >= w.total).length;
+  const kpi = (n, l, sub) => `<div class="adm-kpi"><div class="n">${n}</div><div class="l">${l}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+  admSet(document.getElementById('adminKpis'),
+    kpi(base.length, 'Students') +
+    kpi(base.filter(s => s.lastActive > dayAgo).length, 'Active in last 24h') +
+    kpi(base.filter(s => s.lastActive > weekAgo).length, 'Active in last 7 days') +
+    kpi(base.reduce((n, s) => n + s.games, 0), 'Games played (recent)') +
+    kpi(avg + '%', 'Walkthrough average', `${fin} finished`));
+}
+
+function admRenderWalk(base){
+  const qs = adminQuests(), stats = base.map(s => s.wk), n = stats.length;
+  const fin = stats.filter(w => w.total && w.n >= w.total).length, none = stats.filter(w => w.n === 0).length, mid = n - fin - none;
+  const avg = n ? Math.round(stats.reduce((a, w) => a + w.pct, 0) / n) : 0;
+  document.getElementById('adminWalkSum').textContent = n ? `${avg}% average \u00B7 ${fin}/${n} finished` : '';
+  if(!n){ admSet(document.getElementById('adminWalk'), '<p class="adm-note" style="padding:0 2px;">No students yet.</p>'); return; }
+  const rows = qs.map(q => {
+    const c = stats.filter(w => w.done[q.id]).length, p = Math.round(c / n * 100);
+    return `<div class="adm-qrow"><span class="adm-qico" aria-hidden="true">${escapeHtml(q.ico || '')}</span><span class="adm-qname">${escapeHtml(q.t)}</span><div class="adm-meter"><i style="width:${p}%"></i></div><span class="adm-qnum">${c}/${n} <em>${p}%</em></span></div>`;
+  }).join('');
+  admSet(document.getElementById('adminWalk'), `<div class="adm-wk-pills">
+      <div class="adm-pill ok"><span>Finished all ${qs.length}</span><b>${fin}</b></div>
+      <div class="adm-pill"><span>In progress</span><b>${mid}</b></div>
+      <div class="adm-pill none"><span>Not started</span><b>${none}</b></div>
+    </div><div class="adm-wk-rows">${rows}</div>`);
+}
+
+function admRenderStatus(){
+  const txt = document.getElementById('adminUpdatedTxt'), bar = document.getElementById('adminLoad'), fill = document.getElementById('adminLoadFill');
+  if(!txt) return;
+  const loading = adm.actTotal > 0 && adm.actDone < adm.actTotal;
+  txt.textContent = adm.loadedAt ? `Updated ${timeAgo(adm.loadedAt)}${loading ? ` \u00B7 loading activity ${adm.actDone}/${adm.actTotal}` : ''}` : '';
+  bar.hidden = !loading;
+  if(loading) fill.style.width = Math.round(adm.actDone / adm.actTotal * 100) + '%';
 }
 
 function renderAdmin(){
-  const now = Date.now(), dayAgo = now - 24*60*60*1000, weekAgo = now - 7*24*60*60*1000;
-  if(adminFilter === ADMIN_NONE && !adminInSection(ADMIN_NONE).length) adminFilter = 'all';
-
-  // section cards (All, ICT - 1, ICT - 2, and "No section yet" when somebody has not picked)
-  const cards = [{ key:'all', icon:'\uD83D\uDC65' }, ...CLASS_SECTIONS.map(s => ({ key:s, icon:'\uD83C\uDFEB' }))];
-  if(adminInSection(ADMIN_NONE).length) cards.push({ key:ADMIN_NONE, icon:'\u2754' });
-  document.getElementById('adminSections').innerHTML = cards.map(c => {
-    const list = adminInSection(c.key), act = list.filter(s => s.lastActive > dayAgo).length, on = c.key === adminFilter;
-    return `<button type="button" class="adm-sec ${on ? 'on' : ''}" data-key="${escapeHtml(c.key)}" aria-pressed="${on}" onclick="setAdminSection(this.dataset.key)">
-      <span class="adm-sec-ico" aria-hidden="true">${c.icon}</span>
-      <span class="adm-sec-body"><b>${escapeHtml(adminLabel(c.key))}</b><span>${list.length} student${list.length === 1 ? '' : 's'} \u00B7 ${act} active today</span></span>
-    </button>`;
-  }).join('');
-
-  const list = adminInSection(adminFilter), title = adminFilter === 'all' ? '' : ` \u00B7 ${adminLabel(adminFilter)}`;
-  document.getElementById('adminStudentCount').textContent = `${adminStudents.length} student${adminStudents.length === 1 ? '' : 's'} in total`;
-  document.getElementById('adminTotalStudents').textContent = list.length;
-  document.getElementById('adminActiveToday').textContent = list.filter(s => s.lastActive > dayAgo).length;
-  document.getElementById('adminActiveWeek').textContent = list.filter(s => s.lastActive > weekAgo).length;
-  document.getElementById('adminGamesPlayed').textContent = list.reduce((n, s) => n + s.games, 0);
-  document.getElementById('adminStudentsTitle').textContent = `Students${title}`;
-  document.getElementById('adminFeedTitle').textContent = `Recent activity${title}`;
-
-  const showSec = adminFilter === 'all';
-  document.getElementById('adminStudentRows').innerHTML = list.length
-    ? list.map(s => {
-        const events = s.activity.slice(0, 15).map(a => `<div class="adm-ev"><span class="adm-ev-t">${formatWhen(a.ms)}</span><span>${describeActivity(a)}</span></div>`).join('');
-        const id = escapeHtml(s.id);
-        return `<tr class="adm-row" data-id="${id}" tabindex="0" role="button" aria-expanded="false" title="Click to see recent activity" onclick="toggleAdminStudent(this.dataset.id)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAdminStudent(this.dataset.id);}">
-          <td><span class="adm-caret" aria-hidden="true">\u25B8</span> ${escapeHtml(s.name)}</td>
-          <td>${escapeHtml(s.email)}</td>
-          <td>${adminKey(s) === ADMIN_NONE ? '<span class="adm-badge none">Not set</span>' : `<span class="adm-badge">${escapeHtml(s.classSection)}</span>`}</td>
-          <td>${escapeHtml(s.level)}</td>
-          <td>${s.streak} \uD83D\uDD25</td>
-          <td>${s.games}</td>
-          <td>${formatWhen(s.lastActive)}</td>
-        </tr>
-        <tr class="adm-detail" data-for="${id}" hidden><td colspan="7"><div class="adm-events">${events || '<span class="admin-intro" style="margin:0;">No activity recorded yet.</span>'}</div></td></tr>`;
-      }).join('')
-    : `<tr><td colspan="7">${adminFilter === 'all' ? 'No students yet.' : `No students in ${escapeHtml(adminLabel(adminFilter))} yet.`}</td></tr>`;
-
-  // One row per student (name shown once). Only mini-game plays count; repeats are merged into "x2".
-  const feed = list.map(s => {
-    const plays = s.activity.filter(a => a.type === 'game_played').sort((x, y) => y.ms - x.ms);
-    if(!plays.length) return null;
-    const counts = new Map();                       // keeps most-recent-first order
-    plays.forEach(p => { const k = p.detail || 'Mini game'; counts.set(k, (counts.get(k) || 0) + 1); });
-    return { student: s.name, sec: adminKey(s) === ADMIN_NONE ? '' : s.classSection, ms: plays[0].ms, items: [...counts.entries()] };
-  }).filter(Boolean).sort((x, y) => y.ms - x.ms).slice(0, 20);
-
-  document.getElementById('adminActivityList').innerHTML = feed.length
-    ? feed.map(r => `<div class="admin-activity-row">
-        <span class="aa-time">${formatWhen(r.ms)}</span>
-        <span class="aa-body"><strong>${escapeHtml(r.student)}</strong>${showSec && r.sec ? ` <span class="adm-badge">${escapeHtml(r.sec)}</span>` : ''} played
-          ${r.items.map(([label, n]) => `<span class="aa-chip">${escapeHtml(label)}${n > 1 ? ` <b>\u00D7${n}</b>` : ''}</span>`).join('')}
-        </span>
-      </div>`).join('')
-    : `<p class="admin-intro">No activity recorded yet${adminFilter === 'all' ? '' : ` for ${escapeHtml(adminLabel(adminFilter))}`}. It appears when students play the mini game.</p>`;
+  adm.students.forEach(s => { s.wk = admQuest(s); });
+  if(adm.section === ADMIN_NONE && !adm.students.some(s => adminKey(s) === ADMIN_NONE)) adm.section = 'all';
+  const base = admBase();
+  admRenderSections();
+  admRenderKpis(base);
+  admRenderWalk(base);
+  admRenderStudents();
+  admRenderStatus();
 }
+setInterval(() => { const p = document.getElementById('page-admin'); if(p && p.classList.contains('active') && adm.students.length) admRenderStatus(); }, 30000);
 
-async function loadAdminDashboard(){
-  if(!currentUser || currentUser.email !== ADMIN_EMAIL) return;
-
-  const loading = document.getElementById('adminLoadingMsg');
-  const table = document.getElementById('adminStudentTable');
-  loading.style.display = 'block';
-  loading.style.color = '';
-  loading.textContent = 'Loading student data...';
-  table.style.display = 'none';
-
-  try{
-    const usersSnap = await db.collection('users').get();
-
-    const students = await Promise.all(usersSnap.docs.map(async doc=>{
-      const u = doc.data();
-      const userRef = db.collection('users').doc(doc.id);
-      const activitySnap = await userRef.collection('activity').orderBy('at', 'desc').limit(40).get();
-
-      const name = u.displayName || u.email || '(no name)';
-      const activity = activitySnap.docs.map(a => { const d = a.data(); return { ...d, ms: (d.at && d.at.toMillis) ? d.at.toMillis() : 0 }; })
-        .sort((x, y) => y.ms - x.ms);
-      return {
-        id: doc.id, name, email: u.email || '', level: u.level || '\u2014', classSection: classNormalize(u.classSection || ''),
-        streak: calcStreaks(new Set(Array.isArray(u.activeDays) ? u.activeDays : [])).current,
-        lastActive: u.lastSeenAt || u.lastLoginTimestamp || 0,
-        games: activity.filter(a => a.type === 'game_played').length,
-        activity
-      };
-    }));
-
-    students.sort((a,b)=> b.lastActive - a.lastActive);
-    adminStudents = students;
-    renderAdmin();
-
-    loading.style.display = 'none';
-    table.style.display = 'table';
-  } catch(err){
-    console.error(err);
-    loading.style.color = 'var(--orange-dark)';
-    loading.textContent = `Couldn't load student data (${err.message}). Make sure the admin Firestore rules have been published.`;
-  }
+// Downloads the students currently shown (after section / search / filter) as a spreadsheet-friendly CSV
+function exportAdminCsv(){
+  if(!adm.students.length) return;
+  const { list } = admVisible(), qs = adminQuests();
+  const esc = v => { v = String(v == null ? '' : v); if(/^[=+\-@\t\r]/.test(v)) v = "'" + v; return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const head = ['Name', 'Email', 'Section', 'Level', 'Streak', 'Games (recent)', 'Walkthrough done', 'Walkthrough total', ...qs.map(q => q.t), 'Took tour', 'Last active'];
+  const rows = list.map(s => {
+    const w = s.wk;
+    return [s.name, s.email, adminKey(s) === ADMIN_NONE ? '' : s.classSection, s.level, s.streak, s.actLoaded ? s.games : '', w.n, w.total,
+      ...qs.map(q => w.done[q.id] ? 'Yes' : 'No'), w.tour ? 'Yes' : 'No', s.lastActive ? new Date(s.lastActive).toLocaleString() : 'Never'];
+  });
+  const csv = '\ufeff' + [head, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
+  const a = document.createElement('a'); a.href = url; a.download = `bits-students-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 
@@ -3669,7 +3892,7 @@ function routeApply(raw){
     } else if(page === 'profile'){
       goToPage('profile', true);
     } else if(page === 'admin'){
-      if(currentUser && currentUser.email === ADMIN_EMAIL) goToPage('admin', true);
+      if(currentUser && isAdminEmail(currentUser.email)) goToPage('admin', true);
       else { pendingAdminRoute = true; goToPage('home', true); showWizardStep('welcome'); }   // shown as soon as the admin account finishes signing in
     } else {
       goToPage('home', true); showWizardStep('welcome');
@@ -3678,3 +3901,353 @@ function routeApply(raw){
 }
 window.addEventListener('popstate', () => { routeApply(location.hash); window.scrollTo(0, 0); });
 if(location.hash) routeApply(location.hash);
+
+/* =====================================================================
+   BITS QUEST GUIDE: "?" button, quest checklist and spotlight tour.
+   Self-contained. Edit QUESTS / the tour steps below to change the content.
+   ===================================================================== */
+(function(){ try{
+  const KEY = 'bitsQuestGuideV1';
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const QUESTS = [
+    { id:'signin',  ico:'🔐', t:'Sign in with Google',        d:'Save your streak, scores and progress on any device.' },
+    { id:'class',   ico:'🏫', t:'Choose your class section',  d:'Your teacher uses this to follow your progress.' },
+    { id:'warmup',  ico:'🎯', t:'Answer a warm-up question',  d:'Fresh questions every time. Build a streak!' },
+    { id:'lesson',  ico:'📘', t:'Open a lesson',              d:'Start Learning, pick a section, then choose a topic.' },
+    { id:'game',    ico:'🎮', t:'Visit the Game arena',       d:'Practice conversions and arithmetic like a game.' },
+    { id:'profile', ico:'👤', t:'Check your profile',         d:'See your name, streak and progress in one place.' }
+  ];
+  window.BITS_QUESTS = QUESTS;   // the Admin tab reads this list to show each student's walkthrough progress
+  let S = { done:{}, seen:false, tour:false, hello:false, party:false };
+  try{ const r = JSON.parse(localStorage.getItem(KEY) || 'null'); if(r && typeof r === 'object') S = Object.assign(S, r, { done: r.done || {} }); }catch(_){}
+  /* ---------- walkthrough progress is also saved on the student's account (users/{uid}.questProgress) so the Admin tab can show it ---------- */
+  let syncUid = null, syncOk = false, syncTimer = 0;
+  function push(){
+    if(!syncOk) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => { try{
+      if(typeof currentUser === 'undefined' || !currentUser || currentUser.uid !== syncUid) return;
+      db.collection('users').doc(syncUid).set({ questProgress:{ done:S.done, tour:!!S.tour, seen:!!S.seen, total:QUESTS.length, updatedAt:Date.now() } }, { mergeFields:['questProgress'] }).catch(console.error);
+    }catch(_){} }, 700);
+  }
+  const save = () => { try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(_){} push(); };
+  // once per sign-in: merge what the account already has with this device, then keep the account up to date
+  async function pull(){
+    const uid = currentUser.uid; syncUid = uid; syncOk = false;
+    try{
+      const snap = await db.collection('users').doc(uid).get();
+      if(typeof currentUser === 'undefined' || !currentUser || currentUser.uid !== uid) return;
+      const r = snap.exists ? snap.data().questProgress : null;
+      if(S.uid && S.uid !== uid){ S.done = {}; S.tour = false; S.party = false; }   // this device's checklist belonged to another account
+      if(r && typeof r === 'object'){
+        if(r.done && typeof r.done === 'object') Object.keys(r.done).forEach(k => { if(r.done[k] && !S.done[k]) S.done[k] = r.done[k]; });
+        if(r.tour) S.tour = true;
+        if(r.seen) S.seen = true;
+      }
+      S.uid = uid; syncOk = true; save(); render();
+    }catch(err){ console.warn('Walkthrough sync failed', err); syncUid = null; }
+  }
+  const $ = id => document.getElementById(id);
+  const make = html => { const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; };
+  const vis = e => !!(e && e.getClientRects().length && e.offsetWidth > 0);
+  const navBtn = p => [...document.querySelectorAll('#bottomNav [data-page="'+p+'"], #navLinks [data-page="'+p+'"]')].find(vis) || null;
+  const navBar = () => vis($('bottomNav')) ? $('bottomNav') : $('navLinks');
+  const C = 194.8;
+  const ring = cls => `<svg class="${cls}" viewBox="0 0 70 70"><circle class="bg" cx="35" cy="35" r="31"/><circle class="fg" cx="35" cy="35" r="31" stroke-dasharray="${C}" stroke-dashoffset="${C}"/></svg>`;
+
+  /* ---------- build the UI ---------- */
+  const fab = make(`<button type="button" class="qg-fab" id="qgFab" aria-label="Open the BITS guide and checklist" aria-expanded="false">${ring('qg-ring-wrap')}<span class="qg-fab-q" aria-hidden="true">?</span><span class="qg-fab-count" id="qgCount">0/${QUESTS.length}</span></button>`);
+  const scrim = make('<div class="qg-scrim"></div>');
+  const panel = make(`<section class="qg-panel" role="dialog" aria-label="BITS Quest Guide" aria-hidden="true">
+    <header class="qg-head"><div class="qg-head-txt"><span class="qg-kick">🧭 Your guide</span><h3>BITS Quest Guide</h3><p id="qgSub"></p></div>
+      <div class="qg-bigring">${ring('')}<b id="qgBig">0/${QUESTS.length}</b></div><button type="button" class="qg-x" aria-label="Close guide">✕</button></header>
+    <div class="qg-segs" id="qgSegs"></div><div class="qg-list" id="qgList"></div>
+    <footer class="qg-foot"><button type="button" class="qg-tourbtn btn-3d" id="qgTour">▶ Take the 30-second tour</button><button type="button" class="qg-reset" id="qgReset">Reset checklist</button></footer></section>`);
+  const hello = make('<div class="qg-hello" role="status"><b>👋 New here?</b>Take a quick tour and I’ll show you around BITS.<div><button type="button" class="y">Show me!</button><button type="button" class="n">Maybe later</button></div></div>');
+  const toastEl = make('<div class="qg-toast" role="status" aria-live="polite"></div>');
+  [scrim, panel, hello, toastEl, fab].forEach(n => document.body.appendChild(n));
+  if(!S.seen) fab.classList.add('fresh');
+
+  /* ---------- progress + checklist ---------- */
+  const done = () => QUESTS.filter(q => S.done[q.id]).length;
+  function render(){
+    const n = done(), total = QUESTS.length, f = n / total;
+    document.querySelectorAll('.qg-fab .fg, .qg-bigring .fg').forEach(c => c.style.strokeDashoffset = C * (1 - f));
+    $('qgCount').textContent = n + '/' + total; $('qgBig').textContent = n + '/' + total;
+    $('qgSegs').innerHTML = QUESTS.map(q => '<i class="' + (S.done[q.id] ? 'on' : '') + '"></i>').join('');
+    $('qgSub').textContent = n === total ? '🏆 You’re a BITS Explorer! Amazing work.' : (total - n) + ' quest' + (total - n === 1 ? '' : 's') + ' left. Tap “Show me” and I’ll point the way.';
+    const next = (QUESTS.find(q => !S.done[q.id]) || {}).id;
+    $('qgList').innerHTML = QUESTS.map((q, i) => { const d = S.done[q.id];
+      return `<div class="qg-q ${d ? 'done' : ''} ${q.id === next ? 'next' : ''}" style="--i:${i}"><div class="qg-ico">${d ? CHECK : q.ico}</div>
+        <div class="qg-txt"><b>${q.t}</b>${q.id === next ? '<em>Up next</em>' : ''}<span>${q.d}</span></div>
+        ${d ? '<span class="qg-ok">Done ✓</span>' : `<button type="button" class="qg-go" data-go="${q.id}">Show me</button>`}</div>`; }).join('');
+  }
+  function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => toastEl.classList.remove('show'), 2800); }
+  function party(){
+    const cols = ['#F2A65A','#FFD873','#3D8A8A','#E5584F','#8fd6a8','#9b7be0'];
+    for(let i = 0; i < 44; i++){ const p = document.createElement('span'); p.className = 'qg-confetti';
+      p.style.cssText = `left:${Math.random()*100}vw;background:${cols[i%cols.length]};--x:${(Math.random()*240-120)|0}px;--r:${(Math.random()*900-450)|0}deg;--d:${(1.8+Math.random()*1.6).toFixed(2)}s;animation-delay:${(Math.random()*.5).toFixed(2)}s`;
+      document.body.appendChild(p); setTimeout(() => p.remove(), 4200); }
+  }
+  function mark(id){
+    if(S.done[id]) return; S.done[id] = Date.now(); save(); render();
+    const q = QUESTS.find(x => x.id === id); const all = done() === QUESTS.length;
+    toast(all ? '🏆 All quests complete! You’re a BITS Explorer!' : '✅ Quest complete: ' + q.t);
+    if(all && !S.party){ S.party = true; save(); party(); }
+  }
+
+  /* ---------- panel open / close ---------- */
+  function openPanel(){ endTour(true); hideHello(); render(); panel.classList.add('open'); scrim.classList.add('open'); panel.setAttribute('aria-hidden','false'); fab.setAttribute('aria-expanded','true'); fab.classList.remove('fresh'); S.seen = true; save(); }
+  function closePanel(){ panel.classList.remove('open'); scrim.classList.remove('open'); panel.setAttribute('aria-hidden','true'); fab.setAttribute('aria-expanded','false'); }
+  const isOpen = () => panel.classList.contains('open');
+  function hideHello(){ hello.classList.remove('show'); }
+  fab.addEventListener('click', () => isOpen() ? closePanel() : openPanel());
+  scrim.addEventListener('click', closePanel);
+  panel.querySelector('.qg-x').addEventListener('click', closePanel);
+  document.addEventListener('click', e => { if(isOpen() && !panel.contains(e.target) && !fab.contains(e.target)) closePanel(); });
+  $('qgTour').addEventListener('click', () => startTour(fullTour(), false));
+  $('qgReset').addEventListener('click', () => { S.done = {}; S.party = false; save(); render(); toast('Checklist reset'); autoCheck(); });
+  hello.querySelector('.y').addEventListener('click', () => { hideHello(); startTour(fullTour(), false); });
+  hello.querySelector('.n').addEventListener('click', hideHello);
+
+  /* ---------- spotlight tour ---------- */
+  let T = null;
+  const onHome = () => { const p = $('page-home'), w = $('step-welcome'); if(!(p && p.classList.contains('active') && w && w.classList.contains('active'))){ goToPage('home', true); showWizardStep('welcome'); } };
+  const signEl = () => vis($('googleSignInBtn')) ? $('googleSignInBtn') : $('userChip');
+  const STEP = {
+    signin:  { t:'Sign in here 🔐', d:'Tap this button to sign in with Google. Your streak and progress get saved.', el: signEl },
+    class:   { t:'Pick your class 🏫', d:'Choose ICT - 1, ICT - 2 or Others so your teacher can follow your progress.', pre:onHome, el:() => $('classPickHome') },
+    warmup:  { t:'Try a warm-up 🎯', d:'Tap an answer. Every right one grows your streak, and the questions never repeat.', pre:onHome, el:() => $('warmup') },
+    lesson:  { t:'Start learning 📘', d:'Tap Start Learning, pick a section, then open any topic to see its lesson.', pre:onHome, el:() => document.querySelector('.hero-cta') },
+    game:    { t:'Open the Game 🎮', d:'Tap Game to practice conversions and arithmetic as a challenge.', el:() => navBtn('game') },
+    profile: { t:'Open your profile 👤', d:'Tap Profile to see your name, streak and progress.', el:() => navBtn('profile') }
+  };
+  const fullTour = () => [
+    { t:'Hi, I’m your BITS guide! 🧭', d:'Let’s take a 30-second look around. Leave any time with Esc or Skip.' },
+    Object.assign({}, STEP.signin,  { t:'Save your progress 🔐', d:'Sign in with Google to keep your streak, scores and progress on every device.' }),
+    { t:'Move around 🧭', d:'Home has lessons and warm-ups, Game is for practice, and Profile shows how you’re doing.', el: navBar },
+    Object.assign({}, STEP.lesson, { t:'Start here 📘', d:'Start Learning leads to sections and topics, each with a quick lesson and practice.' }),
+    Object.assign({}, STEP.class,  { t:'Choose your class 🏫' }),
+    Object.assign({}, STEP.warmup, { t:'Quick warm-ups 🎯', d:'Answer fresh questions to build a streak. Wrong answers show the solution!' }),
+    { t:'Your streak calendar 🔥', d:'Practice on different days and watch this calendar light up.', pre:onHome, el:() => $('streakCalendar') },
+    { t:'You’re all set! 🎉', d:'Finish the six quests in your checklist to become a BITS Explorer. Tap the ? button any time.' }
+  ];
+  function startTour(steps, solo){
+    closePanel(); hideHello(); endTour(true);
+    const node = make('<div class="qg-tour" role="dialog" aria-modal="true" aria-label="BITS tour"><div class="qg-spot"></div><div class="qg-tip" tabindex="-1"></div></div>');
+    document.body.appendChild(node);
+    T = { steps, i:0, solo, node, spot:node.querySelector('.qg-spot'), tip:node.querySelector('.qg-tip'), target:null, raf:0 };
+    node.addEventListener('click', e => { const a = e.target.closest('[data-a]'); if(!a) return; const k = a.dataset.a;
+      if(k === 'next') (T.i >= T.steps.length - 1) ? finishTour() : showStep(T.i + 1);
+      else if(k === 'back') showStep(Math.max(0, T.i - 1)); else endTour(); });
+    showStep(0); (function loop(){ if(!T) return; place(); T.raf = requestAnimationFrame(loop); })();
+  }
+  function showStep(i){
+    T.i = i; const s = T.steps[i], n = T.steps.length;
+    if(s.pre) try{ s.pre(); }catch(_){}
+    let el = s.el ? s.el() : null; T.target = vis(el) ? el : null;
+    if(T.target && !T.target.closest('.topnav, .bottom-nav, #navLinks')){
+      const r = T.target.getBoundingClientRect(), tall = r.height > innerHeight * .55;
+      window.scrollTo({ top: Math.max(0, r.top + scrollY - (tall ? 120 : (innerHeight - r.height) / 2 - 30)), behavior:'smooth' });
+    }
+    const last = i === n - 1;
+    T.tip.innerHTML = `<div class="qg-tip-top"><span class="qg-step">${T.solo ? 'Look here' : 'Step ' + (i + 1) + ' of ' + n}</span><button type="button" class="qg-skip" data-a="skip">${T.solo ? 'Close' : 'Skip tour'}</button></div>
+      <h4>${s.t}</h4><p>${s.d}</p>
+      <div class="qg-tip-bot">${T.solo ? '<span></span>' : '<div class="qg-dots">' + T.steps.map((_, k) => '<i class="' + (k === i ? 'on' : '') + '"></i>').join('') + '</div>'}
+      <div class="qg-tip-btns">${i > 0 ? '<button type="button" class="b" data-a="back">Back</button>' : ''}<button type="button" class="n" data-a="next">${T.solo ? 'Got it' : last ? 'Finish 🎉' : 'Next'}</button></div></div>`;
+    T.tip.style.animation = 'none'; void T.tip.offsetWidth; T.tip.style.animation = '';
+    T.spot.style.animation = 'none'; void T.spot.offsetWidth; T.spot.style.animation = '';
+    T.tip.querySelector('.n').focus({ preventScroll:true });
+  }
+  function place(){
+    const sp = T.spot, tip = T.tip, vw = innerWidth, vh = innerHeight, tw = tip.offsetWidth, th = tip.offsetHeight; let top, left;
+    if(T.target && vis(T.target)){
+      const r = T.target.getBoundingClientRect(), pad = 8;
+      sp.classList.remove('none');
+      sp.style.top = (r.top - pad) + 'px'; sp.style.left = (r.left - pad) + 'px'; sp.style.width = (r.width + pad * 2) + 'px'; sp.style.height = (r.height + pad * 2) + 'px';
+      if(vh - r.bottom - pad >= th + 16) top = r.bottom + pad + 12;
+      else if(r.top - pad >= th + 16) top = r.top - pad - 12 - th;
+      else top = vh - th - 12;
+      left = Math.min(Math.max(12, r.left + r.width / 2 - tw / 2), vw - tw - 12);
+    } else {
+      sp.classList.add('none'); sp.style.top = '50%'; sp.style.left = '50%'; sp.style.width = '0'; sp.style.height = '0';
+      top = (vh - th) / 2; left = (vw - tw) / 2;
+    }
+    tip.style.top = Math.max(10, top) + 'px'; tip.style.left = left + 'px';
+  }
+  function endTour(silent){ if(!T) return; cancelAnimationFrame(T.raf); T.node.remove(); T = null; }
+  function finishTour(){ const full = !T.solo; endTour(); if(full){ S.tour = true; save(); setTimeout(openPanel, 280); } }
+  document.addEventListener('keydown', e => {
+    if(e.key === 'Escape'){ if(T) endTour(); else if(isOpen()) closePanel(); }
+    else if(T && e.key === 'ArrowRight'){ (T.i >= T.steps.length - 1) ? finishTour() : showStep(T.i + 1); }
+    else if(T && e.key === 'ArrowLeft'){ showStep(Math.max(0, T.i - 1)); }
+  });
+  $('qgList').addEventListener('click', e => { const b = e.target.closest('[data-go]'); if(b) startTour([STEP[b.dataset.go]], true); });
+
+  /* ---------- automatic quest detection ---------- */
+  function autoCheck(){
+    try{ if(typeof currentUser !== 'undefined' && currentUser){ if(syncUid !== currentUser.uid) pull(); mark('signin'); } else { syncUid = null; syncOk = false; } }catch(_){}
+    try{ if(typeof classSection !== 'undefined' && classSection) mark('class'); }catch(_){}
+  }
+  setInterval(autoCheck, 1200);
+  document.addEventListener('click', e => { if(e.target.closest && e.target.closest('#wuOptions button')) mark('warmup'); }, true);
+  function wrap(name, fn){ try{ const o = window[name]; if(typeof o !== 'function') return; window[name] = function(){ try{ fn.apply(null, arguments); }catch(_){} return o.apply(this, arguments); }; }catch(_){} }
+  wrap('goToPage', n => { if(n === 'game') mark('game'); if(n === 'profile') mark('profile'); });
+  wrap('openTopic', () => mark('lesson'));
+  wrap('showTopicResources', () => mark('lesson'));
+
+  /* ---------- first-visit hello bubble ---------- */
+  if(!S.hello && !S.seen) setTimeout(() => { if(!S.seen && !T && !isOpen()){ S.hello = true; save(); hello.classList.add('show'); } }, 2600);
+  render(); autoCheck();
+  /* ---------- Cheat sheet walkthrough (button sits at the top of every cheat sheet) ---------- */
+  window.startCheatTour = function(btn){
+    const root = btn.closest('.cheat'); if(!root) return;
+    const q = sel => () => root.querySelector(sel);
+    const tab = id => () => { const t = root.querySelector('.cs-tab[data-tab="' + id + '"]'); if(t) csTab(t); };
+    const has = id => !!root.querySelector('.cs-tab[data-tab="' + id + '"]');
+    const steps = [
+      { t:'Your cheat sheet 📒', d:'This is a handy reference for the topic you are studying. Let’s see what is inside.', el:() => { const f = root.closest('.fold'); return f && f.querySelector('.fold-head'); } },
+      { t:'Tabs = different tools', d:'Slide left or right to switch tabs: Explore, examples, quick facts and a converter. Some topics add a tab for the operation, like Addition.', pre:tab('explore'), el:q('.cs-tabsbar') },
+      { t:'Tap to explore 👆', d:'In Explore, tap any tile to see what it means, with examples and how it is built.', el:q('.cs-explore .cs-hint') }
+    ];
+    if(root.querySelector('.cs-modes')) steps.push({ t:'Digits or place values', d:'Switch between the digits and the place values of this number system.', el:q('.cs-modes') });
+    steps.push(
+      { t:'Byte buttons', d:'One byte is 8 bits. Tap Byte 2, Byte 3 and so on to go past 128, all the way up to 2⁶³.', el:q('.cs-pages') },
+      { t:'Where you are', d:'This line tells you which bits and which place values are on screen, and the numbers they stand for.', el:q('.cs-pagehead') },
+      { t:'Place value tiles', d:'The big number is the place value. The small one is its power. Tap a tile to open its full explanation.', el:q('.cs-tiles') }
+    );
+    if(has('op')) steps.push({ t:'Rules for this operation', d:'See the rules and a worked example you can follow step by step.', pre:tab('op'), el:q('.cs-pane[data-pane="op"]') });
+    steps.push(
+      { t:'More examples 📝', d:'Pick a type of problem, then follow the solved steps.', pre:tab('examples'), el:q('.cs-exfilter') },
+      { t:'Quick facts 📚', d:'Short reminders and rules to check your thinking before a quiz.', pre:tab('facts'), el:q('.cs-factsgrid') },
+      { t:'Converter 🧮', d:'First choose which number system you will type in.', pre:tab('conv'), el:q('.cs-conv .cs-bases') },
+      { t:'Type a number', d:'It shows the number in binary, octal, decimal and hex at once. Open “Show the steps” to learn how. Great for checking your answers!', el:q('.cs-conv-in') },
+      { t:'Now you try! 🎉', d:'Go back to Explore and tap a tile. You can replay this walkthrough any time.', pre:tab('explore') }
+    );
+    startTour(steps, false);
+  };
+  window.openBitsGuide = openPanel; window.startBitsTour = () => startTour(fullTour(), false);
+}catch(err){ console.warn('BITS guide failed to start', err); } })();
+
+
+/* =====================================================================
+   SKETCH RESUME: remembers each student's sketchpad drawing (on this device)
+   and shows a "Continue where you left off" pop-up on the Home tab that
+   jumps straight back to that topic's sketchpad.
+   ===================================================================== */
+(function(){ try{
+  const KEY = 'bitsSketchResumeV1', MAX_BYTES = 2400000;
+  const $ = id => document.getElementById(id);
+  let saved = {}, cur = null, dismissed = 0, shownTs = 0, shownRec = null, timer = 0;
+  try{ saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }catch(_){ saved = {}; }
+
+  // bring saved drawings back into the sketchpad's own store, so opening the topic shows them again
+  Object.keys(saved).forEach(k => { const r = saved[k];
+    const sk = (r && r.key) || k;
+    if(r && Array.isArray(r.strokes) && r.strokes.length && !sketchStore[sk]){
+      sketchStore[sk] = { redo:[], w:r.w || 0, h:r.h || 0, view:r.view || { z:1, x:0, y:0 },
+        strokes: r.strokes.map(s => ({ color:s.color, size:s.size, erase:!!s.erase, pts:s.pts.map(a => ({ x:a[0], y:a[1] })) })) };
+    } });
+
+  function persist(){
+    let txt = JSON.stringify(saved);
+    while(txt.length > MAX_BYTES && Object.keys(saved).length > 1){      // too big: forget the oldest drawing first
+      const oldest = Object.keys(saved).sort((a, b) => saved[a].ts - saved[b].ts)[0]; delete saved[oldest]; txt = JSON.stringify(saved);
+    }
+    try{ localStorage.setItem(KEY, txt); }catch(_){}
+  }
+  function saveNow(){
+    try{
+      if(!sketch || !sketch.entry || !cur || cur.key !== sketch.topic.key) return;
+      const st = sketch.entry.strokes; let from = 0;
+      for(let i = st.length - 1; i >= 0; i--) if(st[i].clear){ from = i + 1; break; }
+      const live = st.slice(from).filter(s => s.pts && s.pts.length);
+      if(!live.length){ delete saved[cur.id || cur.key]; persist(); return; }
+      const r = v => Math.round(v * 10) / 10;
+      saved[cur.id || cur.key] = { kind:cur.kind || 'learn', familyKey:cur.familyKey || null, levelKey:cur.levelKey, key:cur.key, title:cur.title, ts:Date.now(), w:sketch.entry.w, h:sketch.entry.h,
+        view:sketch.entry.view || null, n:live.filter(s => !s.erase).length,
+        strokes: live.map(s => ({ color:s.color, size:r(s.size), erase:!!s.erase, pts:s.pts.map(p => [r(p.x), r(p.y)]) })) };
+      persist();
+    }catch(_){}
+  }
+  const later = () => { clearTimeout(timer); timer = setTimeout(saveNow, 350); };
+
+  function after(name){ try{ const o = window[name]; if(typeof o !== 'function') return; window[name] = function(){ const out = o.apply(this, arguments); later(); return out; }; }catch(_){} }
+  ['sketchUndo', 'sketchRedo', 'sketchClear'].forEach(after);
+  document.addEventListener('pointerup', e => { if(e.target && e.target.id === 'skCanvas') later(); });
+  document.addEventListener('pointercancel', e => { if(e.target && e.target.id === 'skCanvas') later(); });
+  document.addEventListener('visibilitychange', () => { if(document.hidden) saveNow(); });
+  window.addEventListener('pagehide', saveNow);
+  (function(){ const o = window.showTopicResources; if(typeof o !== 'function') return;
+    window.showTopicResources = function(levelKey, topic){ try{ saveNow(); cur = { kind:'learn', id:topic.key, levelKey, key:topic.key, title:topic.title + (topic.diff && DIFF_NAME[topic.diff] ? ' (' + DIFF_NAME[topic.diff] + ')' : '') }; }catch(_){} return o.apply(this, arguments); }; })();
+
+  (function(){ const o = window.openGamePlay; if(typeof o !== 'function') return;
+    window.openGamePlay = function(levelKey, familyKey){
+      try{ saveNow(); const f = familiesOf(levelKey).find(x => x.key === familyKey);
+        if(f) cur = { kind:'game', id:'game:' + f.key, levelKey, familyKey, key:f.key, title:f.title }; }catch(_){}
+      return o.apply(this, arguments); }; })();
+
+  /* ---------- the pop-up on the Home tab and the Game tab ---------- */
+  const HEADS = ['Your sketch is waiting ✏️', 'Your ideas are still on the page 💭', 'Unfinished masterpiece detected 🎨', 'Don’t leave your thinking hanging 🧠'];
+  const pop = document.createElement('div');
+  pop.className = 'sr-pop'; pop.setAttribute('role', 'region'); pop.setAttribute('aria-label', 'Continue your sketch');
+  pop.innerHTML = '<button type="button" class="sr-main"><span class="sr-thumb"><canvas width="144" height="104" aria-hidden="true"></canvas><i class="sr-pen" aria-hidden="true">✏️</i></span>' +
+    '<span class="sr-txt"><em class="sr-head"></em><b>Continue where you left off</b><span class="sr-meta"></span></span><span class="sr-go" aria-hidden="true">→</span></button>' +
+    '<button type="button" class="sr-x" aria-label="Hide this reminder">✕</button>';
+  document.body.appendChild(pop);
+
+  const latest = kind => Object.keys(saved).map(k => saved[k]).filter(r => r && r.strokes && r.strokes.length && (!kind || (r.kind || 'learn') === kind)).sort((a, b) => b.ts - a.ts)[0] || null;
+  function ago(ts){ const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
+    if(m < 1) return 'just now'; if(m < 60) return m + ' min ago'; const h = Math.round(m / 60); if(h < 24) return h + ' h ago';
+    const d = Math.round(h / 24); return d === 1 ? 'yesterday' : d + ' days ago'; }
+  function thumb(cv, rec){
+    const ctx = cv.getContext('2d'), W = cv.width, H = cv.height; ctx.clearRect(0, 0, W, H);
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    rec.strokes.forEach(s => { if(!s.erase) s.pts.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }); });
+    if(x1 < x0) return;
+    const pad = 12, bw = Math.max(x1 - x0, 1), bh = Math.max(y1 - y0, 1), k = Math.min((W - pad * 2) / bw, (H - pad * 2) / bh, 1.2);
+    const ox = (W - bw * k) / 2 - x0 * k, oy = (H - bh * k) / 2 - y0 * k;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    rec.strokes.forEach(s => {
+      ctx.globalCompositeOperation = s.erase ? 'destination-out' : 'source-over';
+      ctx.strokeStyle = s.color; ctx.lineWidth = Math.max(1.8, Math.min(s.erase ? 9 : 4.5, s.size * k));
+      ctx.beginPath(); s.pts.forEach((p, i) => { const x = p[0] * k + ox, y = p[1] * k + oy; if(i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      if(s.pts.length === 1) ctx.lineTo(s.pts[0][0] * k + ox + .01, s.pts[0][1] * k + oy);
+      ctx.stroke();
+    });
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  function show(rec){
+    shownRec = rec;
+    if(shownTs !== rec.ts + rec.key){
+      shownTs = rec.ts + rec.key;
+      pop.querySelector('.sr-head').textContent = HEADS[Math.floor(Math.random() * HEADS.length)];
+      pop.querySelector('.sr-meta').textContent = (rec.title || 'Your topic') + (rec.kind === 'game' ? ' · 🎮 Game' : '') + ' · ' + ago(rec.ts);
+      thumb(pop.querySelector('canvas'), rec);
+    }
+    pop.classList.add('show');
+  }
+  function tick(){
+    const p = $('page-home'), w = $('step-welcome'), g = $('page-game'), gs = document.querySelector('#page-game .game-step.active');
+    const onHome = p && p.classList.contains('active') && w && w.classList.contains('active');
+    const onGame = g && g.classList.contains('active') && gs && (gs.id === 'gstep-sections' || gs.id === 'gstep-topics');   // not while a sketchpad is already open
+    const rec = onGame ? latest('game') : onHome ? latest() : null;
+    const busy = document.querySelector('.qg-tour');
+    if(rec && rec.ts !== dismissed && !busy) show(rec); else pop.classList.remove('show');
+  }
+  setInterval(tick, 700); setTimeout(tick, 900);
+
+  pop.querySelector('.sr-x').addEventListener('click', e => { e.stopPropagation(); const r = shownRec || latest(); dismissed = r ? r.ts : 0; pop.classList.remove('show'); });
+  pop.querySelector('.sr-main').addEventListener('click', () => {
+    const rec = shownRec || latest(); if(!rec) return; let topic = null; const game = rec.kind === 'game';
+    try{ topic = game ? familiesOf(rec.levelKey).find(f => f.key === rec.familyKey) : allTopicsOf(rec.levelKey).find(t => t.key === rec.key); }catch(_){}
+    pop.classList.remove('show');
+    if(!topic){ Object.keys(saved).forEach(k => { if(saved[k] === rec) delete saved[k]; }); persist(); return; }
+    if(game){ goToPage('game', true); openGamePlay(rec.levelKey, rec.familyKey); }
+    else { goToPage('home', true); showTopicResources(rec.levelKey, topic); }
+    const jump = () => { const m = $('sketchMount'); if(!m) return;
+      window.scrollTo({ top: Math.max(0, m.getBoundingClientRect().top + scrollY - 90), behavior:'smooth' });
+      const c = m.querySelector('.sketch-card'); if(c){ c.classList.add('sr-flash'); setTimeout(() => c.classList.remove('sr-flash'), 2400); } };
+    setTimeout(jump, 450); setTimeout(jump, 1000);
+  });
+}catch(err){ console.warn('BITS sketch resume failed to start', err); } })();
